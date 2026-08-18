@@ -18,9 +18,12 @@ responsibilities.
 
 The framework is usable as an installable Python package. It contains the
 validated public contracts, source/target-isolated datasets, deterministic
-fixtures, quantitative evaluation, and visual review bundles. No geometry
-refinement algorithm is included yet. The first backend is specified as a
-deterministic, non-learned joint cuboid and per-frame pose optimizer in the
+fixtures, quantitative evaluation, and visual review bundles. The first
+backend, `JointCuboidRefiner`, now implements versioned initial evidence-region
+selection, robust ground estimation, point-state traces, and trace-aware review
+bundles. It deliberately returns `insufficient_evidence` until the joint pose
+and canonical-size optimizer and its quality gate are implemented. The full
+algorithm is specified in the
 [Geometric Refinement V1 design](docs/geometric-refinement-v1.md).
 
 ## Install and import
@@ -39,6 +42,16 @@ case = dataset.load_case("scene-001_vehicle-0042")
 
 # A concrete backend subclasses TrackRefiner and implements _refine(case).
 result = my_refiner.refine(case)
+```
+
+The in-progress deterministic backend can already be used to inspect its
+initial evidence decisions without producing a false refinement:
+
+```python
+from trackrefinery import JointCuboidRefiner, build_review_bundle
+
+run = JointCuboidRefiner().refine_with_trace(case)
+build_review_bundle(case, run.outcome, "review/case", trace=run.trace)
 ```
 
 The base package depends only on NumPy. Review rendering is an optional extra;

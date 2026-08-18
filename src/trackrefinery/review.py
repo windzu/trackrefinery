@@ -20,6 +20,12 @@ from trackrefinery.contracts import (
     RefinementSuccess,
 )
 from trackrefinery.evaluation import EvaluationReport
+from trackrefinery.geometric.trace import (
+    EvidenceState,
+    GeometricRefinementTrace,
+    validate_geometric_trace,
+    write_geometric_trace,
+)
 from trackrefinery.geometry import (
     BOX_EDGE_INDICES,
     box_corners,
@@ -32,6 +38,13 @@ from trackrefinery.targets import GoldTarget
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
 
+EVIDENCE_COLORS = {
+    EvidenceState.TARGET: "#00c853",
+    EvidenceState.AMBIGUOUS: "#ffab00",
+    EvidenceState.BACKGROUND: "#78909c",
+    EvidenceState.GROUND: "#8d6e63",
+}
+
 
 def build_review_bundle(
     case: RefinementCase,
@@ -40,6 +53,7 @@ def build_review_bundle(
     *,
     target: GoldTarget | None = None,
     evaluation: EvaluationReport | None = None,
+    trace: GeometricRefinementTrace | None = None,
     crop_scale: float = 1.8,
     max_points_per_frame: int = 8_000,
 ) -> Path:
@@ -54,6 +68,8 @@ def build_review_bundle(
         raise ValueError("target does not belong to the review case")
     if evaluation is not None and evaluation.case_id != case.case_id:
         raise ValueError("evaluation does not belong to the review case")
+    if trace is not None:
+        validate_geometric_trace(case, trace)
 
     output = Path(output_dir).resolve()
     thumbnails = output / "thumbnails"
@@ -73,6 +89,10 @@ def build_review_bundle(
     aggregate_groups: list[NDArray[np.float32]] = []
     frame_indices: list[NDArray[np.int16]] = []
     preview_frames: list[dict[str, object]] = []
+    evidence_states: list[NDArray[np.uint8]] = []
+    trace_by_frame = (
+        {frame.frame_id: frame for frame in trace.frames} if trace is not None else {}
+    )
     for frame_index, frame in enumerate(case.frames):
         observation = observations[frame.frame_id]
         coarse_box = observation.coarse_box
@@ -94,20 +114,34 @@ def build_review_bundle(
             if target is not None and frame.frame_id in target_poses
             else None
         )
-        points = _preview_points(
-            frame.points_xyz,
-            tuple(
-                box for box in (coarse_box, refined_box, gold_box) if box is not None
-            ),
-            crop_scale,
-            max_points_per_frame,
-        )
+        frame_trace = trace_by_frame.get(frame.frame_id)
+        if frame_trace is None:
+            points = _preview_points(
+                frame.points_xyz,
+                tuple(
+                    box
+                    for box in (coarse_box, refined_box, gold_box)
+                    if box is not None
+                ),
+                crop_scale,
+                max_points_per_frame,
+            )
+            point_states = None
+        else:
+            positions = _trace_preview_positions(
+                frame_trace.point_states, max_points_per_frame
+            )
+            indices = frame_trace.roi_point_indices[positions]
+            points = frame.points_xyz[indices]
+            point_states = frame_trace.point_states[positions]
         alignment_pose = (
             refined_box.pose if refined_box is not None else coarse_box.pose
         )
         local = inverse_transform_points(points, alignment_pose).astype(np.float32)
         aggregate_groups.append(local)
         frame_indices.append(np.full(len(local), frame_index, dtype=np.int16))
+        if point_states is not None:
+            evidence_states.append(point_states)
         preview_frames.append(
             {
                 "frame_id": frame.frame_id,
@@ -115,17 +149,23 @@ def build_review_bundle(
                 "coarse_box": coarse_box,
                 "refined_box": refined_box,
                 "gold_box": gold_box,
+                "point_states": point_states,
             }
         )
 
     aggregate = np.concatenate(aggregate_groups)
     aggregate_frame_index = np.concatenate(frame_indices)
-    np.savez_compressed(
-        output / "aggregate.npz",
-        points_xyz=aggregate,
-        frame_index=aggregate_frame_index,
-        frame_ids=np.asarray([frame.frame_id for frame in case.frames]),
+    aggregate_evidence_state = (
+        np.concatenate(evidence_states) if trace is not None else None
     )
+    aggregate_payload: dict[str, NDArray[np.generic]] = {
+        "points_xyz": aggregate,
+        "frame_index": aggregate_frame_index,
+        "frame_ids": np.asarray([frame.frame_id for frame in case.frames]),
+    }
+    if aggregate_evidence_state is not None:
+        aggregate_payload["evidence_state"] = aggregate_evidence_state
+    np.savez_compressed(output / "aggregate.npz", **aggregate_payload)
     (output / "result.json").write_text(
         json.dumps(outcome_to_dict(case.case_id, outcome), indent=2, sort_keys=True)
         + "\n",
@@ -133,6 +173,8 @@ def build_review_bundle(
     )
     if evaluation is not None:
         evaluation.write_json(output / "metrics.json")
+    if trace is not None:
+        write_geometric_trace(output, trace)
     bundle_manifest = {
         "contract_version": "trackrefinery-review-bundle-v1",
         "case_id": case.case_id,
@@ -143,6 +185,9 @@ def build_review_bundle(
         "max_points_per_frame": max_points_per_frame,
         "has_gold_target": target is not None,
         "has_metrics": evaluation is not None,
+        "has_evidence_trace": trace is not None,
+        "evidence_trace_path": "evidence_trace.json" if trace is not None else None,
+        "evidence_masks_path": "evidence_masks.npz" if trace is not None else None,
     }
     (output / "bundle.json").write_text(
         json.dumps(bundle_manifest, indent=2, sort_keys=True) + "\n",
@@ -153,6 +198,7 @@ def build_review_bundle(
         thumbnails,
         aggregate,
         aggregate_frame_index,
+        aggregate_evidence_state,
         preview_frames,
         outcome,
         target,
@@ -164,9 +210,11 @@ def build_review_bundle(
         outcome,
         aggregate,
         aggregate_frame_index,
+        aggregate_evidence_state,
         preview_frames,
         target,
         evaluation,
+        trace,
     )
     return output
 
@@ -224,10 +272,39 @@ def _preview_points(
     return selected
 
 
+def _trace_preview_positions(
+    states: NDArray[np.uint8], maximum: int
+) -> NDArray[np.int64]:
+    """Deterministically retain every evidence class in a bounded preview."""
+
+    if len(states) <= maximum:
+        return np.arange(len(states), dtype=np.int64)
+    chosen = np.zeros(len(states), dtype=bool)
+    nonempty = [state for state in EvidenceState if np.any(states == state.value)]
+    quota = max(1, maximum // len(nonempty))
+    for state in nonempty:
+        positions = np.flatnonzero(states == state.value)
+        take = min(len(positions), quota)
+        selected = np.linspace(0, len(positions) - 1, take, dtype=np.int64)
+        chosen[positions[selected]] = True
+    current = int(np.count_nonzero(chosen))
+    if current < maximum:
+        remaining = np.flatnonzero(~chosen)
+        take = min(len(remaining), maximum - current)
+        selected = np.linspace(0, len(remaining) - 1, take, dtype=np.int64)
+        chosen[remaining[selected]] = True
+    positions = np.flatnonzero(chosen)
+    if len(positions) > maximum:
+        selected = np.linspace(0, len(positions) - 1, maximum, dtype=np.int64)
+        positions = positions[selected]
+    return positions.astype(np.int64, copy=False)
+
+
 def _write_thumbnails(
     output: Path,
     aggregate: NDArray[np.float32],
     frame_index: NDArray[np.int16],
+    evidence_state: NDArray[np.uint8] | None,
     preview_frames: list[dict[str, object]],
     outcome: RefinementOutcome,
     target: GoldTarget | None,
@@ -296,11 +373,34 @@ def _write_thumbnails(
         figure.savefig(output / name, dpi=140)
         plt.close(figure)
 
+    if evidence_state is not None:
+        figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
+        _scatter_evidence_2d(axis, aggregate, evidence_state, 0, 1)
+        _plot_box_projection(
+            axis,
+            Box3D((0.0, 0.0, 0.0), size, (0.0, 0.0, 0.0, 1.0)),
+            0,
+            1,
+            "#d500f9",
+            "coarse median size",
+        )
+        axis.set_title("Initial evidence classification")
+        axis.set_xlabel("X (m)")
+        axis.set_ylabel("Y (m)")
+        axis.set_aspect("equal", adjustable="box")
+        axis.legend(loc="best")
+        figure.savefig(output / "aggregate_evidence_top.png", dpi=140)
+        plt.close(figure)
+
     worst_frame_id = _worst_frame_id(evaluation, preview_frames)
     frame = next(item for item in preview_frames if item["frame_id"] == worst_frame_id)
     figure, axis = plt.subplots(figsize=(8, 6), constrained_layout=True)
     points = frame["points_xyz"]
-    axis.scatter(points[:, 0], points[:, 1], s=1, c="#9e9e9e", alpha=0.65)
+    point_states = frame["point_states"]
+    if isinstance(point_states, np.ndarray):
+        _scatter_evidence_2d(axis, points, point_states, 0, 1)
+    else:
+        axis.scatter(points[:, 0], points[:, 1], s=1, c="#9e9e9e", alpha=0.65)
     for key, color, label in (
         ("coarse_box", "#ffab00", "coarse"),
         ("refined_box", "#00c853", "refined"),
@@ -316,6 +416,25 @@ def _write_thumbnails(
     axis.legend(loc="best")
     figure.savefig(output / f"worst_frame_{worst_frame_id}.png", dpi=140)
     plt.close(figure)
+
+
+def _scatter_evidence_2d(
+    axis: Axes,
+    points: NDArray[np.floating],
+    states: NDArray[np.uint8],
+    first: int,
+    second: int,
+) -> None:
+    for state in EvidenceState:
+        selected = points[states == state.value]
+        axis.scatter(
+            selected[:, first],
+            selected[:, second],
+            s=2,
+            c=EVIDENCE_COLORS[state],
+            alpha=0.7,
+            label=state.name.lower(),
+        )
 
 
 def _plot_box_projection(
@@ -359,9 +478,11 @@ def _write_html(
     outcome: RefinementOutcome,
     aggregate: NDArray[np.float32],
     aggregate_frame_index: NDArray[np.int16],
+    aggregate_evidence_state: NDArray[np.uint8] | None,
     preview_frames: list[dict[str, object]],
     target: GoldTarget | None,
     evaluation: EvaluationReport | None,
+    trace: GeometricRefinementTrace | None,
 ) -> None:
     try:
         import plotly.graph_objects as go
@@ -412,19 +533,41 @@ def _write_html(
         margin={"l": 0, "r": 0, "t": 45, "b": 0},
     )
 
+    evidence_figure = None
+    if aggregate_evidence_state is not None:
+        evidence_figure = go.Figure()
+        for state_trace in _plotly_evidence_traces(aggregate, aggregate_evidence_state):
+            evidence_figure.add_trace(state_trace)
+        _add_plotly_box(
+            evidence_figure,
+            Box3D((0.0, 0.0, 0.0), result_size, (0.0, 0.0, 0.0, 1.0)),
+            "coarse median size",
+            "#d500f9",
+        )
+        evidence_figure.update_layout(
+            title="Initial evidence classification",
+            scene={"aspectmode": "data"},
+            margin={"l": 0, "r": 0, "t": 45, "b": 0},
+        )
+
     animation_frames = []
     for item in preview_frames:
         points = item["points_xyz"]
-        traces: list[object] = [
-            go.Scatter3d(
-                x=points[:, 0],
-                y=points[:, 1],
-                z=points[:, 2],
-                mode="markers",
-                marker={"size": 1.5, "color": "#a0a0a0", "opacity": 0.65},
-                name="context points",
-            )
-        ]
+        point_states = item["point_states"]
+        traces: list[object]
+        if isinstance(point_states, np.ndarray):
+            traces = _plotly_evidence_traces(points, point_states)
+        else:
+            traces = [
+                go.Scatter3d(
+                    x=points[:, 0],
+                    y=points[:, 1],
+                    z=points[:, 2],
+                    mode="markers",
+                    marker={"size": 1.5, "color": "#a0a0a0", "opacity": 0.65},
+                    name="context points",
+                )
+            ]
         for key, label, color in (
             ("coarse_box", "coarse", "#ffab00"),
             ("refined_box", "refined", "#00c853"),
@@ -470,11 +613,22 @@ def _write_html(
     aggregate_html = pio.to_html(
         aggregate_figure, include_plotlyjs=True, full_html=False
     )
+    evidence_html = (
+        pio.to_html(evidence_figure, include_plotlyjs=False, full_html=False)
+        if evidence_figure is not None
+        else ""
+    )
+    evidence_section = f"<section>{evidence_html}</section>" if evidence_html else ""
     frame_html = pio.to_html(frame_figure, include_plotlyjs=False, full_html=False)
     metrics_json = (
         json.dumps(evaluation.to_dict(), indent=2, sort_keys=True)
         if evaluation is not None
         else "No gold metrics for this case."
+    )
+    trace_json = (
+        json.dumps(trace.to_summary_dict(), indent=2, sort_keys=True)
+        if trace is not None
+        else "No algorithm evidence trace for this case."
     )
     case_display = html_module.escape(case.case_id)
     track_display = html_module.escape(case.track.track_id)
@@ -500,8 +654,10 @@ def _write_html(
   <h1>{case_display}</h1>
   <p>Track {track_display} · {outcome.status}</p>
   <section>{aggregate_html}</section>
+  {evidence_section}
   <section>{frame_html}</section>
   <section><h2>Metrics</h2><pre>{metrics_json}</pre></section>
+  <section><h2>Evidence trace</h2><pre>{trace_json}</pre></section>
   <section>
     <h2>Reviewer feedback</h2>
     <select id="verdict">
@@ -542,6 +698,31 @@ function downloadFeedback() {{
 
 def _add_plotly_box(figure: object, box: Box3D, name: str, color: str) -> None:
     figure.add_trace(_plotly_box_trace(box, name, color))
+
+
+def _plotly_evidence_traces(
+    points: NDArray[np.floating], states: NDArray[np.uint8]
+) -> list[object]:
+    import plotly.graph_objects as go
+
+    traces = []
+    for state in EvidenceState:
+        selected = points[states == state.value]
+        traces.append(
+            go.Scatter3d(
+                x=selected[:, 0],
+                y=selected[:, 1],
+                z=selected[:, 2],
+                mode="markers",
+                marker={
+                    "size": 1.8,
+                    "color": EVIDENCE_COLORS[state],
+                    "opacity": 0.7,
+                },
+                name=state.name.lower(),
+            )
+        )
+    return traces
 
 
 def _plotly_box_trace(box: Box3D, name: str, color: str) -> object:
