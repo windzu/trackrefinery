@@ -37,10 +37,13 @@ Per-frame pose:
 
 Evidence/robustness diagnostics:
 
-- retained target points and occupied voxels per frame;
+- target, ambiguous, background, and ground point counts per frame;
 - observed-side/view-direction coverage;
-- fitted-boundary residual and interior occupancy;
+- registration residual and supported outer-envelope residual;
+- free-space and ground-contact violations when the required provenance is
+  available;
 - leave-one-frame-out size and pose stability;
+- supported sensor-dropout stability and numerical conditioning;
 - change from the coarse initialization;
 - runtime and peak memory.
 
@@ -138,4 +141,5 @@ viewer supplies the interaction needed for human diagnosis. They are two views
 of one result bundle rather than competing solutions. The framework currently
 implements both views, result/metric JSON, and downloadable reviewer feedback;
 algorithm-selected evidence masks will be added with the algorithm trace
-contract.
+contract. That trace is defined by the accepted
+[deterministic geometric refinement design](geometric-refinement-v1.md).

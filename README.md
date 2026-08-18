@@ -19,7 +19,9 @@ responsibilities.
 The framework is usable as an installable Python package. It contains the
 validated public contracts, source/target-isolated datasets, deterministic
 fixtures, quantitative evaluation, and visual review bundles. No geometry
-refinement algorithm is included yet.
+refinement algorithm is included yet. The first backend is specified as a
+deterministic, non-learned joint cuboid and per-frame pose optimizer in the
+[Geometric Refinement V1 design](docs/geometric-refinement-v1.md).
 
 ## Install and import
 

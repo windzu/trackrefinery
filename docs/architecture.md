@@ -64,11 +64,16 @@ with diagnostics; it must not silently return coarse boxes as refined output.
 
 ## Algorithm boundary
 
-The framework deliberately selects no crop, segmentation, aggregation,
-geometry-fit, or pose-optimization algorithm. Those decisions follow a separate
-design review. A backend may be geometric, learned, or hybrid, but it receives
-the same full-frame evidence and must return the same validated success or
-insufficient-evidence outcome.
+The public framework remains backend-neutral, but the first supported backend
+is now selected: `JointCuboidRefiner` is a deterministic geometric optimizer
+with no learned weights or category-conditioned size priors. It jointly owns
+evidence assignment, canonical geometry, and per-frame pose refinement. The
+accepted algorithm and evidence-quality contract are specified in
+[Deterministic Geometric Refinement V1](geometric-refinement-v1.md).
+
+Future experimental backends may use a different implementation without
+changing the public full-frame input or validated success/insufficient outcome.
+They must be named explicitly and must not weaken the V1 success semantics.
 
 ## Integration direction
 
