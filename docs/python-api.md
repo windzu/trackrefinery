@@ -30,10 +30,11 @@ for every input observation in the same order.
 
 ## Inspect the deterministic backend
 
-The first backend currently implements initial point-evidence selection and
-ground estimation. Until joint registration, cuboid fitting, and success gates
-are implemented, it intentionally returns `algorithm_stage_incomplete` rather
-than copying coarse geometry:
+The first backend currently implements initial point-evidence selection,
+ground estimation, robust per-frame upright registration, and persistent
+canonical shape aggregation. Until cuboid fitting, alternating reassignment,
+and success gates are implemented, it intentionally returns
+`algorithm_stage_incomplete` rather than publishing provisional geometry:
 
 ```python
 from trackrefinery import JointCuboidRefiner, write_geometric_trace
@@ -41,6 +42,11 @@ from trackrefinery import JointCuboidRefiner, write_geometric_trace
 run = JointCuboidRefiner().refine_with_trace(case)
 assert run.outcome.status == "insufficient_evidence"
 write_geometric_trace("traces/case", run.trace)
+
+assert run.trace.canonical_shape is not None
+for frame in run.trace.frames:
+    # These are trace-only candidates, not released refinement results.
+    print(frame.registration.status)
 ```
 
 Settings are immutable, content-addressed, and internal to the backend:
@@ -50,10 +56,12 @@ from trackrefinery import (
     EvidenceSelectionSettings,
     GeometricRefinementSettings,
     JointCuboidRefiner,
+    RegistrationSettings,
 )
 
 settings = GeometricRefinementSettings(
-    evidence=EvidenceSelectionSettings(roi_margin_xyz_m=(1.1, 1.0, 0.55))
+    evidence=EvidenceSelectionSettings(roi_margin_xyz_m=(1.1, 1.0, 0.55)),
+    registration=RegistrationSettings(canonical_support_radius_m=0.15),
 )
 backend = JointCuboidRefiner(settings)
 print(settings.sha256)
@@ -61,6 +69,8 @@ print(settings.sha256)
 
 The required caller contract still supplies full frame clouds. These settings
 are versioned algorithm configuration, not a caller-owned crop request.
+Install `trackrefinery[geometric]` before invoking this backend; importing the
+base package and using its contracts remains NumPy-only.
 
 ## Load source-only input
 
@@ -126,10 +136,12 @@ build_review_bundle(
 )
 ```
 
-The bundle contains fixed aggregate artifacts, orthographic thumbnails,
-metrics, optional evidence-mask sidecars, and a self-contained interactive
-HTML view. With a trace, initial target, ambiguous, background, and ground
-points can be toggled and inspected independently. Serve it with
+The bundle contains fixed aggregate artifacts, the provisional
+`canonical_shape.npz`, orthographic thumbnails, metrics, optional evidence-mask
+sidecars, and a self-contained interactive HTML view. With a trace, initial
+target, ambiguous, background, and ground points can be toggled independently;
+candidate registration poses are explicitly labeled and never presented as a
+refined result. Serve it with
 `trackrefinery-review review/run-001/case --open`.
 
 The CLI accepts the same sidecar through

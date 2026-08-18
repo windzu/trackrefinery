@@ -21,17 +21,21 @@ validated public contracts, source/target-isolated datasets, deterministic
 fixtures, quantitative evaluation, and visual review bundles. The first
 backend, `JointCuboidRefiner`, now implements versioned initial evidence-region
 selection, robust ground estimation, point-state traces, and trace-aware review
-bundles. It deliberately returns `insufficient_evidence` until the joint pose
-and canonical-size optimizer and its quality gate are implemented. The full
-algorithm is specified in the
+bundles. It also performs deterministic per-frame upright registration and
+builds a cross-frame-supported provisional canonical point shape. It
+deliberately returns `insufficient_evidence` until visible-envelope cuboid
+fitting, alternating reassignment, and the final quality gate are implemented.
+The full algorithm is specified in the
 [Geometric Refinement V1 design](docs/geometric-refinement-v1.md).
 
 ## Install and import
 
 ```bash
 python -m pip install .
+# Include the deterministic geometric backend:
+python -m pip install '.[geometric]'
 # Include visual review generation:
-python -m pip install '.[review]'
+python -m pip install '.[geometric,review]'
 ```
 
 ```python
@@ -44,8 +48,9 @@ case = dataset.load_case("scene-001_vehicle-0042")
 result = my_refiner.refine(case)
 ```
 
-The in-progress deterministic backend can already be used to inspect its
-initial evidence decisions without producing a false refinement:
+The in-progress deterministic backend can already be used to inspect initial
+evidence, provisional poses, and its persistent canonical shape without
+producing a false refinement:
 
 ```python
 from trackrefinery import JointCuboidRefiner, build_review_bundle
@@ -54,8 +59,9 @@ run = JointCuboidRefiner().refine_with_trace(case)
 build_review_bundle(case, run.outcome, "review/case", trace=run.trace)
 ```
 
-The base package depends only on NumPy. Review rendering is an optional extra;
-importing the core package does not require Plotly or Matplotlib.
+The base package depends only on NumPy. Registration uses SciPy through the
+`geometric` extra, while review rendering uses the `review` extra. Importing
+the core contracts does not require SciPy, Plotly, or Matplotlib.
 
 ## Quick start
 

@@ -71,6 +71,12 @@ evidence assignment, canonical geometry, and per-frame pose refinement. The
 accepted algorithm and evidence-quality contract are specified in
 [Deterministic Geometric Refinement V1](geometric-refinement-v1.md).
 
+The implementation currently reaches deterministic initial evidence, upright
+per-frame registration, and persistent canonical point aggregation. These are
+trace-only intermediate stages: visible-envelope dimensions, alternating
+evidence reassignment, and the release-quality observability gate are still
+required before this backend may return success.
+
 Future experimental backends may use a different implementation without
 changing the public full-frame input or validated success/insufficient outcome.
 They must be named explicitly and must not weaken the V1 success semantics.

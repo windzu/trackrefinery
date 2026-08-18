@@ -21,6 +21,7 @@ from trackrefinery.contracts import (
 )
 from trackrefinery.evaluation import EvaluationReport
 from trackrefinery.geometric.trace import (
+    CanonicalShapeTrace,
     EvidenceState,
     GeometricRefinementTrace,
     validate_geometric_trace,
@@ -115,6 +116,18 @@ def build_review_bundle(
             else None
         )
         frame_trace = trace_by_frame.get(frame.frame_id)
+        registration_box = None
+        if (
+            frame_trace is not None
+            and frame_trace.registration is not None
+            and frame_trace.registration.candidate_pose_annotation is not None
+        ):
+            candidate_pose = frame_trace.registration.candidate_pose_annotation
+            registration_box = Box3D(
+                candidate_pose.translation_xyz,
+                coarse_box.size_lwh,
+                candidate_pose.orientation_xyzw,
+            )
         if frame_trace is None:
             points = _preview_points(
                 frame.points_xyz,
@@ -135,7 +148,13 @@ def build_review_bundle(
             points = frame.points_xyz[indices]
             point_states = frame_trace.point_states[positions]
         alignment_pose = (
-            refined_box.pose if refined_box is not None else coarse_box.pose
+            refined_box.pose
+            if refined_box is not None
+            else (
+                registration_box.pose
+                if registration_box is not None
+                else coarse_box.pose
+            )
         )
         local = inverse_transform_points(points, alignment_pose).astype(np.float32)
         aggregate_groups.append(local)
@@ -148,6 +167,7 @@ def build_review_bundle(
                 "points_xyz": points,
                 "coarse_box": coarse_box,
                 "refined_box": refined_box,
+                "registration_box": registration_box,
                 "gold_box": gold_box,
                 "point_states": point_states,
             }
@@ -166,6 +186,13 @@ def build_review_bundle(
     if aggregate_evidence_state is not None:
         aggregate_payload["evidence_state"] = aggregate_evidence_state
     np.savez_compressed(output / "aggregate.npz", **aggregate_payload)
+    canonical_shape = None if trace is None else trace.canonical_shape
+    if canonical_shape is not None:
+        np.savez_compressed(
+            output / "canonical_shape.npz",
+            points_xyz=canonical_shape.points_xyz,
+            frame_support_count=canonical_shape.frame_support_count,
+        )
     (output / "result.json").write_text(
         json.dumps(outcome_to_dict(case.case_id, outcome), indent=2, sort_keys=True)
         + "\n",
@@ -186,8 +213,12 @@ def build_review_bundle(
         "has_gold_target": target is not None,
         "has_metrics": evaluation is not None,
         "has_evidence_trace": trace is not None,
+        "has_registration_trace": canonical_shape is not None,
         "evidence_trace_path": "evidence_trace.json" if trace is not None else None,
         "evidence_masks_path": "evidence_masks.npz" if trace is not None else None,
+        "canonical_shape_path": (
+            "canonical_shape.npz" if canonical_shape is not None else None
+        ),
     }
     (output / "bundle.json").write_text(
         json.dumps(bundle_manifest, indent=2, sort_keys=True) + "\n",
@@ -203,6 +234,7 @@ def build_review_bundle(
         outcome,
         target,
         evaluation,
+        canonical_shape,
     )
     _write_html(
         output / "preview.html",
@@ -309,6 +341,7 @@ def _write_thumbnails(
     outcome: RefinementOutcome,
     target: GoldTarget | None,
     evaluation: EvaluationReport | None,
+    canonical_shape: CanonicalShapeTrace | None,
 ) -> None:
     try:
         import matplotlib
@@ -349,13 +382,19 @@ def _write_thumbnails(
                 )
             )
         )
+        result_label = (
+            "result" if isinstance(outcome, RefinementSuccess) else "coarse median"
+        )
+        result_color = (
+            "#00c853" if isinstance(outcome, RefinementSuccess) else "#d500f9"
+        )
         _plot_box_projection(
             axis,
             Box3D((0.0, 0.0, 0.0), size, (0.0, 0.0, 0.0, 1.0)),
             first,
             second,
-            "#00c853",
-            "result",
+            result_color,
+            result_label,
         )
         if target is not None:
             _plot_box_projection(
@@ -371,6 +410,24 @@ def _write_thumbnails(
         axis.set_aspect("equal", adjustable="box")
         axis.legend(loc="best")
         figure.savefig(output / name, dpi=140)
+        plt.close(figure)
+
+    if canonical_shape is not None:
+        figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
+        scatter = axis.scatter(
+            canonical_shape.points_xyz[:, 0],
+            canonical_shape.points_xyz[:, 1],
+            c=canonical_shape.frame_support_count,
+            s=2,
+            cmap="viridis",
+            alpha=0.75,
+        )
+        figure.colorbar(scatter, ax=axis, label="supporting frames")
+        axis.set_title("Provisional canonical shape (registration only)")
+        axis.set_xlabel("canonical X (m)")
+        axis.set_ylabel("canonical Y (m)")
+        axis.set_aspect("equal", adjustable="box")
+        figure.savefig(output / "canonical_registration_top.png", dpi=140)
         plt.close(figure)
 
     if evidence_state is not None:
@@ -403,6 +460,7 @@ def _write_thumbnails(
         axis.scatter(points[:, 0], points[:, 1], s=1, c="#9e9e9e", alpha=0.65)
     for key, color, label in (
         ("coarse_box", "#ffab00", "coarse"),
+        ("registration_box", "#d500f9", "registration candidate"),
         ("refined_box", "#00c853", "refined"),
         ("gold_box", "#00b8d4", "gold"),
     ):
@@ -514,11 +572,17 @@ def _write_html(
             )
         )
     )
+    result_label = (
+        "result size"
+        if isinstance(outcome, RefinementSuccess)
+        else "coarse median size (not refined)"
+    )
+    result_color = "#00c853" if isinstance(outcome, RefinementSuccess) else "#d500f9"
     _add_plotly_box(
         aggregate_figure,
         Box3D((0.0, 0.0, 0.0), result_size, (0.0, 0.0, 0.0, 1.0)),
-        "result size",
-        "#00c853",
+        result_label,
+        result_color,
     )
     if target is not None:
         _add_plotly_box(
@@ -532,6 +596,33 @@ def _write_html(
         scene={"aspectmode": "data"},
         margin={"l": 0, "r": 0, "t": 45, "b": 0},
     )
+
+    canonical_figure = None
+    if trace is not None and trace.canonical_shape is not None:
+        shape = trace.canonical_shape
+        canonical_figure = go.Figure(
+            data=[
+                go.Scatter3d(
+                    x=shape.points_xyz[:, 0],
+                    y=shape.points_xyz[:, 1],
+                    z=shape.points_xyz[:, 2],
+                    mode="markers",
+                    marker={
+                        "size": 2,
+                        "color": shape.frame_support_count,
+                        "colorscale": "Viridis",
+                        "colorbar": {"title": "frames"},
+                        "opacity": 0.75,
+                    },
+                    name="persistent evidence",
+                )
+            ]
+        )
+        canonical_figure.update_layout(
+            title="Provisional canonical shape (registration only)",
+            scene={"aspectmode": "data"},
+            margin={"l": 0, "r": 0, "t": 45, "b": 0},
+        )
 
     evidence_figure = None
     if aggregate_evidence_state is not None:
@@ -570,6 +661,7 @@ def _write_html(
             ]
         for key, label, color in (
             ("coarse_box", "coarse", "#ffab00"),
+            ("registration_box", "registration candidate", "#d500f9"),
             ("refined_box", "refined", "#00c853"),
             ("gold_box", "gold", "#00b8d4"),
         ):
@@ -613,6 +705,12 @@ def _write_html(
     aggregate_html = pio.to_html(
         aggregate_figure, include_plotlyjs=True, full_html=False
     )
+    canonical_html = (
+        pio.to_html(canonical_figure, include_plotlyjs=False, full_html=False)
+        if canonical_figure is not None
+        else ""
+    )
+    canonical_section = f"<section>{canonical_html}</section>" if canonical_html else ""
     evidence_html = (
         pio.to_html(evidence_figure, include_plotlyjs=False, full_html=False)
         if evidence_figure is not None
@@ -654,6 +752,7 @@ def _write_html(
   <h1>{case_display}</h1>
   <p>Track {track_display} · {outcome.status}</p>
   <section>{aggregate_html}</section>
+  {canonical_section}
   {evidence_section}
   <section>{frame_html}</section>
   <section><h2>Metrics</h2><pre>{metrics_json}</pre></section>

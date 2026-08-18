@@ -8,6 +8,7 @@ from trackrefinery.contracts import (
     RefinementOutcome,
 )
 from trackrefinery.geometric.evidence import select_initial_evidence
+from trackrefinery.geometric.registration import register_canonical_shape
 from trackrefinery.geometric.settings import GeometricRefinementSettings
 from trackrefinery.geometric.trace import (
     GeometricRefinementRun,
@@ -18,7 +19,7 @@ from trackrefinery.refiner import TrackRefiner, validate_outcome
 
 
 class JointCuboidRefiner(TrackRefiner):
-    """Deterministic joint refiner, currently gated at initial evidence stage."""
+    """Deterministic joint refiner, gated before cuboid envelope fitting."""
 
     def __init__(self, settings: GeometricRefinementSettings | None = None) -> None:
         self.settings = settings or GeometricRefinementSettings()
@@ -38,7 +39,8 @@ class JointCuboidRefiner(TrackRefiner):
     def _execute(
         self, case: RefinementCase
     ) -> tuple[RefinementOutcome, GeometricRefinementTrace]:
-        trace = select_initial_evidence(case, self.settings)
+        initial_trace = select_initial_evidence(case, self.settings)
+        trace = register_canonical_shape(case, initial_trace, self.settings)
         frame_summaries = [frame.to_summary_dict() for frame in trace.frames]
         ground_missing = [
             frame.frame_id for frame in trace.frames if frame.ground_plane is None
@@ -46,6 +48,22 @@ class JointCuboidRefiner(TrackRefiner):
         reasons = ["algorithm_stage_incomplete"]
         if ground_missing:
             reasons.append("ground_support_unavailable")
+        failed_registration = [
+            frame
+            for frame in trace.frames
+            if frame.registration is None or frame.registration.status != "registered"
+        ]
+        if any(
+            frame.registration is not None
+            and "insufficient_target_points" in frame.registration.reason_codes
+            for frame in failed_registration
+        ):
+            reasons.append("insufficient_target_points")
+        if trace.canonical_shape is None or not trace.canonical_shape.converged:
+            reasons.append("optimization_not_converged")
+        reasons.extend(
+            f"pose_unobservable:{frame.frame_id}" for frame in failed_registration
+        )
         outcome = InsufficientEvidence(
             track_id=case.track.track_id,
             reasons=tuple(reasons),
@@ -57,6 +75,12 @@ class JointCuboidRefiner(TrackRefiner):
                 "frame_count": len(trace.frames),
                 "total_point_state_counts": trace.total_counts,
                 "ground_support_missing_frame_ids": ground_missing,
+                "registered_frame_count": len(trace.frames) - len(failed_registration),
+                "canonical_shape": (
+                    None
+                    if trace.canonical_shape is None
+                    else trace.canonical_shape.to_summary_dict()
+                ),
                 "frames": frame_summaries,
             },
         )

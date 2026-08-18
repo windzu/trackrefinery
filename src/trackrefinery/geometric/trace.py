@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from trackrefinery.contracts import RefinementCase, RefinementOutcome
+from trackrefinery.contracts import Pose3D, RefinementCase, RefinementOutcome
 
 EVIDENCE_TRACE_CONTRACT = "trackrefinery-geometric-evidence-trace-v1"
 
@@ -79,6 +79,124 @@ class GroundPlaneEstimate:
 
 
 @dataclass(frozen=True, slots=True)
+class FrameRegistrationTrace:
+    """Provisional registration state for one frame, never a released result."""
+
+    status: str
+    reason_codes: tuple[str, ...]
+    canonical_from_coarse: Pose3D | None
+    candidate_pose_annotation: Pose3D | None
+    iterations: int
+    correspondence_count: int
+    initial_rmse_m: float | None
+    final_rmse_m: float | None
+    translation_correction_m: float | None
+    yaw_correction_deg: float | None
+
+    def __post_init__(self) -> None:
+        if self.status not in {"registered", "insufficient_evidence"}:
+            raise ValueError("registration status is unsupported")
+        reasons = tuple(self.reason_codes)
+        if self.status == "registered":
+            if reasons:
+                raise ValueError("registered frames cannot contain reason codes")
+            if (
+                self.canonical_from_coarse is None
+                or self.candidate_pose_annotation is None
+            ):
+                raise ValueError("registered frames require both provisional poses")
+            if (
+                self.iterations < 1
+                or self.correspondence_count < 1
+                or any(
+                    value is None
+                    for value in (
+                        self.initial_rmse_m,
+                        self.final_rmse_m,
+                        self.translation_correction_m,
+                        self.yaw_correction_deg,
+                    )
+                )
+            ):
+                raise ValueError("registered frames require complete metrics")
+        else:
+            if not reasons or any(not value for value in reasons):
+                raise ValueError("insufficient registration requires reason codes")
+            if (
+                self.canonical_from_coarse is not None
+                or self.candidate_pose_annotation is not None
+            ):
+                raise ValueError("insufficient registration cannot contain poses")
+        if self.iterations < 0 or self.correspondence_count < 0:
+            raise ValueError("registration counts must be non-negative")
+        metrics = (
+            self.initial_rmse_m,
+            self.final_rmse_m,
+            self.translation_correction_m,
+            self.yaw_correction_deg,
+        )
+        if any(
+            value is not None and (not np.isfinite(value) or value < 0)
+            for value in metrics
+        ):
+            raise ValueError("registration metrics must be finite and non-negative")
+        object.__setattr__(self, "reason_codes", reasons)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "reason_codes": list(self.reason_codes),
+            "canonical_from_coarse": _pose_to_dict(self.canonical_from_coarse),
+            "candidate_pose_annotation": _pose_to_dict(self.candidate_pose_annotation),
+            "iterations": self.iterations,
+            "correspondence_count": self.correspondence_count,
+            "initial_rmse_m": self.initial_rmse_m,
+            "final_rmse_m": self.final_rmse_m,
+            "translation_correction_m": self.translation_correction_m,
+            "yaw_correction_deg": self.yaw_correction_deg,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> FrameRegistrationTrace:
+        if not isinstance(value, dict):
+            raise ValueError("registration must be an object")
+        reasons = value.get("reason_codes")
+        if not isinstance(reasons, list) or any(
+            not isinstance(reason, str) for reason in reasons
+        ):
+            raise ValueError("registration reason_codes must be a string list")
+        return cls(
+            status=_string(value.get("status"), "registration.status"),
+            reason_codes=tuple(reasons),
+            canonical_from_coarse=_optional_pose(
+                value.get("canonical_from_coarse"), "canonical_from_coarse"
+            ),
+            candidate_pose_annotation=_optional_pose(
+                value.get("candidate_pose_annotation"), "candidate_pose_annotation"
+            ),
+            iterations=_integer(value.get("iterations"), "registration.iterations"),
+            correspondence_count=_integer(
+                value.get("correspondence_count"),
+                "registration.correspondence_count",
+            ),
+            initial_rmse_m=_optional_number(
+                value.get("initial_rmse_m"), "registration.initial_rmse_m"
+            ),
+            final_rmse_m=_optional_number(
+                value.get("final_rmse_m"), "registration.final_rmse_m"
+            ),
+            translation_correction_m=_optional_number(
+                value.get("translation_correction_m"),
+                "registration.translation_correction_m",
+            ),
+            yaw_correction_deg=_optional_number(
+                value.get("yaw_correction_deg"),
+                "registration.yaw_correction_deg",
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class FrameEvidenceTrace:
     """Point states for one ROI, indexed back into the immutable frame cloud."""
 
@@ -87,6 +205,7 @@ class FrameEvidenceTrace:
     point_states: NDArray[np.uint8]
     ground_plane: GroundPlaneEstimate | None = None
     represented_sensor_ids: tuple[str, ...] = ()
+    registration: FrameRegistrationTrace | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.frame_id, str) or not self.frame_id:
@@ -131,6 +250,70 @@ class FrameEvidenceTrace:
             "ground_plane": (
                 None if self.ground_plane is None else self.ground_plane.to_dict()
             ),
+            "registration": (
+                None if self.registration is None else self.registration.to_dict()
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalShapeTrace:
+    """Persistent, voxelized object evidence in the provisional object frame."""
+
+    points_xyz: NDArray[np.float32]
+    frame_support_count: NDArray[np.uint16]
+    registered_frame_ids: tuple[str, ...]
+    voxel_size_m: float
+    iterations: int
+    converged: bool
+
+    def __post_init__(self) -> None:
+        points = np.asarray(self.points_xyz)
+        support = np.asarray(self.frame_support_count)
+        if points.dtype != np.float32 or points.ndim != 2 or points.shape[1] != 3:
+            raise ValueError("canonical points_xyz must be float32 with shape [C, 3]")
+        if not len(points):
+            raise ValueError("canonical points_xyz must be non-empty")
+        if not np.isfinite(points).all():
+            raise ValueError("canonical points_xyz must be finite")
+        if support.dtype != np.uint16 or support.shape != (len(points),):
+            raise ValueError("frame_support_count must be uint16 with shape [C]")
+        frame_ids = tuple(self.registered_frame_ids)
+        if len(frame_ids) < 2 or len(frame_ids) != len(set(frame_ids)):
+            raise ValueError("canonical shape requires at least two registered frames")
+        if len(support) and (np.any(support < 2) or np.any(support > len(frame_ids))):
+            raise ValueError("canonical support counts are outside frame bounds")
+        if not np.isfinite(self.voxel_size_m) or self.voxel_size_m <= 0:
+            raise ValueError("canonical voxel_size_m must be finite and positive")
+        if self.iterations < 1:
+            raise ValueError("canonical iterations must be positive")
+        if not isinstance(self.converged, bool):
+            raise ValueError("canonical converged must be boolean")
+        points = points.copy()
+        support = support.copy()
+        points.setflags(write=False)
+        support.setflags(write=False)
+        object.__setattr__(self, "points_xyz", points)
+        object.__setattr__(self, "frame_support_count", support)
+        object.__setattr__(self, "registered_frame_ids", frame_ids)
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return {
+            "point_count": len(self.points_xyz),
+            "registered_frame_ids": list(self.registered_frame_ids),
+            "voxel_size_m": self.voxel_size_m,
+            "iterations": self.iterations,
+            "converged": self.converged,
+            "minimum_frame_support": (
+                None
+                if not len(self.frame_support_count)
+                else int(self.frame_support_count.min())
+            ),
+            "maximum_frame_support": (
+                None
+                if not len(self.frame_support_count)
+                else int(self.frame_support_count.max())
+            ),
         }
 
 
@@ -146,6 +329,7 @@ class GeometricRefinementTrace:
     settings_json: str
     stage: str
     frames: tuple[FrameEvidenceTrace, ...]
+    canonical_shape: CanonicalShapeTrace | None = None
 
     def __post_init__(self) -> None:
         string_values = (
@@ -180,6 +364,10 @@ class GeometricRefinementTrace:
         frame_ids = [frame.frame_id for frame in frames]
         if not frames or len(frame_ids) != len(set(frame_ids)):
             raise ValueError("trace frames must be non-empty and unique")
+        if self.canonical_shape is not None:
+            unknown = set(self.canonical_shape.registered_frame_ids) - set(frame_ids)
+            if unknown:
+                raise ValueError("canonical shape references unknown registered frames")
         object.__setattr__(self, "frames", frames)
 
     @property
@@ -208,6 +396,11 @@ class GeometricRefinementTrace:
             "stage": self.stage,
             "total_point_state_counts": self.total_counts,
             "frames": [frame.to_summary_dict() for frame in self.frames],
+            "canonical_shape": (
+                None
+                if self.canonical_shape is None
+                else self.canonical_shape.to_summary_dict()
+            ),
         }
 
 
@@ -255,6 +448,17 @@ def validate_geometric_trace(
             )
             if represented != frame_trace.represented_sensor_ids:
                 raise ValueError("trace represented sensors do not match ROI points")
+    if trace.canonical_shape is not None:
+        registered = tuple(
+            frame.frame_id
+            for frame in trace.frames
+            if frame.registration is not None
+            and frame.registration.status == "registered"
+        )
+        if trace.canonical_shape.registered_frame_ids != registered:
+            raise ValueError(
+                "canonical shape registered frames do not match frame traces"
+            )
 
 
 def write_geometric_trace(
@@ -278,6 +482,16 @@ def write_geometric_trace(
             raise AssertionError("trace frame summary must be an object")
         row["roi_indices_key"] = index_key
         row["point_states_key"] = state_key
+    canonical_row = manifest.get("canonical_shape")
+    if trace.canonical_shape is not None:
+        if not isinstance(canonical_row, dict):
+            raise AssertionError("canonical shape summary must be an object")
+        point_key = "canonical_points_xyz"
+        support_key = "canonical_frame_support_count"
+        arrays[point_key] = trace.canonical_shape.points_xyz
+        arrays[support_key] = trace.canonical_shape.frame_support_count
+        canonical_row["points_key"] = point_key
+        canonical_row["frame_support_count_key"] = support_key
     manifest["arrays_path"] = "evidence_masks.npz"
 
     arrays_path = output / "evidence_masks.npz"
@@ -321,6 +535,7 @@ def read_geometric_trace(path: str | Path) -> GeometricRefinementTrace:
             if not isinstance(index_key, str) or not isinstance(state_key, str):
                 raise ValueError("trace frame array keys must be strings")
             ground = row.get("ground_plane")
+            registration = row.get("registration")
             sensors = row.get("represented_sensor_ids")
             if not isinstance(sensors, list) or any(
                 not isinstance(value, str) for value in sensors
@@ -337,7 +552,41 @@ def read_geometric_trace(path: str | Path) -> GeometricRefinementTrace:
                         else GroundPlaneEstimate.from_dict(ground)
                     ),
                     represented_sensor_ids=tuple(sensors),
+                    registration=(
+                        None
+                        if registration is None
+                        else FrameRegistrationTrace.from_dict(registration)
+                    ),
                 )
+            )
+        canonical_row = payload.get("canonical_shape")
+        canonical_shape = None
+        if canonical_row is not None:
+            if not isinstance(canonical_row, dict):
+                raise ValueError("canonical_shape must be an object")
+            point_key = _string(canonical_row.get("points_key"), "points_key")
+            support_key = _string(
+                canonical_row.get("frame_support_count_key"),
+                "frame_support_count_key",
+            )
+            registered_ids = canonical_row.get("registered_frame_ids")
+            if not isinstance(registered_ids, list) or any(
+                not isinstance(value, str) for value in registered_ids
+            ):
+                raise ValueError("registered_frame_ids must be a string list")
+            canonical_shape = CanonicalShapeTrace(
+                points_xyz=np.asarray(arrays[point_key], dtype=np.float32),
+                frame_support_count=np.asarray(arrays[support_key], dtype=np.uint16),
+                registered_frame_ids=tuple(registered_ids),
+                voxel_size_m=_number(
+                    canonical_row.get("voxel_size_m"), "canonical voxel_size_m"
+                ),
+                iterations=_integer(
+                    canonical_row.get("iterations"), "canonical iterations"
+                ),
+                converged=_boolean(
+                    canonical_row.get("converged"), "canonical converged"
+                ),
             )
     settings = payload.get("settings")
     if not isinstance(settings, dict):
@@ -358,6 +607,7 @@ def read_geometric_trace(path: str | Path) -> GeometricRefinementTrace:
         settings_json=settings_json,
         stage=_string(payload.get("stage"), "stage"),
         frames=tuple(frames),
+        canonical_shape=canonical_shape,
     )
 
 
@@ -382,7 +632,44 @@ def _number(value: object, name: str) -> float:
     return result
 
 
+def _optional_number(value: object, name: str) -> float | None:
+    return None if value is None else _number(value, name)
+
+
+def _boolean(value: object, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be boolean")
+    return value
+
+
 def _float_triplet(value: object, name: str) -> tuple[float, float, float]:
     if not isinstance(value, list) or len(value) != 3:
         raise ValueError(f"{name} must be a three-value list")
     return tuple(_number(item, f"{name}[]") for item in value)  # type: ignore[return-value]
+
+
+def _pose_to_dict(pose: Pose3D | None) -> dict[str, list[float]] | None:
+    if pose is None:
+        return None
+    return {
+        "translation_xyz": list(pose.translation_xyz),
+        "orientation_xyzw": list(pose.orientation_xyzw),
+    }
+
+
+def _optional_pose(value: object, name: str) -> Pose3D | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} must be an object")
+    orientation = value.get("orientation_xyzw")
+    if not isinstance(orientation, list) or len(orientation) != 4:
+        raise ValueError(f"{name}.orientation_xyzw must contain four values")
+    return Pose3D(
+        translation_xyz=_float_triplet(
+            value.get("translation_xyz"), f"{name}.translation_xyz"
+        ),
+        orientation_xyzw=tuple(
+            _number(item, f"{name}.orientation_xyzw[]") for item in orientation
+        ),  # type: ignore[arg-type]
+    )

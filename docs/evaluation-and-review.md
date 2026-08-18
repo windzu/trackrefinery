@@ -1,7 +1,7 @@
 # Evaluation and Review Design
 
-Status: framework and initial algorithm evidence traces implemented; correction
-tolerances and later optimization diagnostics remain to be calibrated
+Status: framework, evidence traces, and registration previews implemented;
+correction tolerances and later optimization diagnostics remain to be calibrated
 
 ## What “good” means
 
@@ -98,11 +98,13 @@ Every algorithm run should produce an immutable review bundle:
 review/<run_id>/<case_id>/
   result.json
   metrics.json                 # when a gold target is available
-  aggregate.npz                # selected points in refined instance frame
+  aggregate.npz                # selected points in candidate/refined frame
+  canonical_shape.npz          # registration-stage persistent evidence
   preview.html                 # self-contained or locally served viewer
   thumbnails/
     aggregate_top.png
     aggregate_side.png
+    canonical_registration_top.png
     worst_frame_<id>.png
 ```
 
@@ -114,7 +116,8 @@ gold boxes independently toggleable.
 A fixed aggregate alone is insufficient: pose errors can cancel or smear in
 aggregation and hide which frame is wrong. The web viewer therefore provides:
 
-1. per-frame mode with a timeline and coarse/refined/gold overlays;
+1. per-frame mode with a timeline and separately named
+   coarse/registration-candidate/refined/gold overlays;
 2. aggregate object-frame mode, colored by source frame;
 3. selected-versus-rejected evidence display when a future algorithm supplies
    an evidence-trace sidecar; the framework viewer otherwise shows the local
@@ -141,5 +144,7 @@ viewer supplies the interaction needed for human diagnosis. They are two views
 of one result bundle rather than competing solutions. The framework currently
 implements both views, result/metric JSON, downloadable reviewer feedback, and
 the initial target/ambiguous/background/ground evidence masks defined by the
-[deterministic geometric refinement design](geometric-refinement-v1.md). Later
-optimization rounds will reuse the same trace contract for reassigned evidence.
+[deterministic geometric refinement design](geometric-refinement-v1.md). It now
+also exports provisional registered poses and a canonical point shape colored
+by cross-frame support. Later optimization rounds will reuse the same trace
+contract for reassigned evidence and fitted envelopes.
