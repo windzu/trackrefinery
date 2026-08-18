@@ -1,6 +1,6 @@
 # Deterministic Geometric Refinement V1
 
-Status: accepted algorithm design; initial evidence and trace stages implemented
+Status: accepted algorithm design; evidence, registration, and trace stages implemented
 
 ## Decision
 
@@ -150,6 +150,33 @@ Interior target points support registration and containment but do not pull a
 cuboid face inward. Only observable outer-envelope evidence may tighten a
 face.
 
+### Implemented registration stage
+
+The current stage-three implementation keeps registration separate from the
+future size estimate:
+
+- points begin in each coarse-box-local frame, while coarse object poses are
+  composed through exact `T_world_from_annotation` transforms before candidate
+  poses are returned to the annotation frame;
+- bounded planar principal-axis initialization supplies an orientation seed
+  only; it is not treated as a fitted cuboid or a final pose claim;
+- deterministic voxel representatives and robust point-to-local-surface
+  residuals jointly refine horizontal translation, vertical translation, and
+  yaw across frames;
+- every frame is matched against the other frames rather than its own points,
+  preventing self-correspondence from falsely reporting a zero residual;
+- canonical points are retained only when another configured number of frames
+  supports them within the configured spatial radius.
+
+The resulting per-frame poses and canonical points are development candidates
+inside the trace. They are not copied into `RefinementSuccess`. Sparse or
+degenerate frames carry explicit registration reason codes, and the entire
+backend remains gated until envelope fitting and all success checks exist.
+
+SciPy spatial indexing is loaded only by this stage through the optional
+`geometric` package extra. The public contracts and dataset tools retain their
+NumPy-only installation path.
+
 ## Joint objective
 
 The conceptual robust objective is:
@@ -296,7 +323,9 @@ tolerances and require no geometry correction in blinded X-Points review.
 2. **Implemented:** add deterministic initial evidence selection and ground
    estimation with review-mask visualization. Point ownership remains an
    initialization and will be recomputed by later optimization rounds.
-3. Implement robust per-frame registration and canonical shape aggregation.
+3. **Implemented:** add deterministic robust per-frame registration and
+   cross-frame-supported canonical shape aggregation. Candidate poses remain
+   trace-only.
 4. Implement visible-envelope cuboid fitting and the alternating loop.
 5. Add multi-hypothesis selection, observability, and dropout stability gates.
 6. Calibrate on reviewed development/calibration tracks, freeze thresholds,

@@ -79,15 +79,20 @@ def test_review_bundle_renders_algorithm_evidence_trace(tmp_path: Path) -> None:
 
     manifest = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
     assert manifest["has_evidence_trace"] is True
+    assert manifest["has_registration_trace"] is True
     assert (bundle / "evidence_trace.json").is_file()
     assert (bundle / "evidence_masks.npz").is_file()
+    assert (bundle / "canonical_shape.npz").is_file()
     assert (bundle / "thumbnails" / "aggregate_evidence_top.png").is_file()
+    assert (bundle / "thumbnails" / "canonical_registration_top.png").is_file()
     with np.load(bundle / "aggregate.npz", allow_pickle=False) as archive:
         assert archive["evidence_state"].shape == (len(archive["points_xyz"]),)
         assert len(archive["points_xyz"]) <= len(case.frames) * 300
     html = (bundle / "preview.html").read_text(encoding="utf-8")
     assert "Initial evidence classification" in html
     assert "Evidence trace" in html
+    assert "registration candidate" in html
+    assert "Provisional canonical shape (registration only)" in html
 
 
 def test_review_cli_accepts_portable_evidence_trace(tmp_path: Path) -> None:

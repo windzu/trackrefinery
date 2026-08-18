@@ -25,6 +25,9 @@ classifiers = [
 dependencies = ["numpy>=1.24"]
 
 [project.optional-dependencies]
+geometric = [
+  "scipy>=1.10",
+]
 review = [
   "matplotlib>=3.8",
   "plotly>=5.24",
@@ -35,6 +38,7 @@ dev = [
   "plotly>=5.24",
   "pytest>=8.0",
   "ruff>=0.6",
+  "scipy>=1.10",
 ]
 
 [project.scripts]

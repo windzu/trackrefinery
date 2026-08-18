@@ -1,6 +1,6 @@
 # Portable Data Contract v1
 
-Status: implemented framework contract; refinement algorithm intentionally absent
+Status: implemented framework contract; geometric backend not yet release-complete
 
 ## Logical API
 
