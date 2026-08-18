@@ -13,6 +13,7 @@ from trackrefinery.evaluation import (
     evaluate_case,
     evaluate_suite,
 )
+from trackrefinery.geometric import read_geometric_trace
 from trackrefinery.refiner import validate_outcome
 from trackrefinery.review import build_review_bundle, serve_review_bundle
 from trackrefinery.serde import read_outcome
@@ -92,6 +93,7 @@ def build_review_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--result", required=True)
     parser.add_argument("--target-root")
     parser.add_argument("--thresholds")
+    parser.add_argument("--trace")
     parser.add_argument("--output", required=True)
     parser.add_argument("--crop-scale", type=float, default=1.8)
     parser.add_argument("--max-points-per-frame", type=int, default=8_000)
@@ -119,6 +121,7 @@ def build_review_main(argv: Sequence[str] | None = None) -> int:
         args.output,
         target=target,
         evaluation=report,
+        trace=read_geometric_trace(args.trace) if args.trace else None,
         crop_scale=args.crop_scale,
         max_points_per_frame=args.max_points_per_frame,
     )
@@ -164,6 +167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     build_parser.add_argument("--result", required=True)
     build_parser.add_argument("--target-root")
     build_parser.add_argument("--thresholds")
+    build_parser.add_argument("--trace")
     build_parser.add_argument("--output", required=True)
     build_parser.add_argument("--crop-scale", type=float, default=1.8)
     build_parser.add_argument("--max-points-per-frame", type=int, default=8_000)

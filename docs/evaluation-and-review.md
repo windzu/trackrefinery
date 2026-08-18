@@ -1,7 +1,7 @@
 # Evaluation and Review Design
 
-Status: framework implemented; correction tolerances and algorithm-side
-evidence traces remain to be calibrated
+Status: framework and initial algorithm evidence traces implemented; correction
+tolerances and later optimization diagnostics remain to be calibrated
 
 ## What “good” means
 
@@ -139,7 +139,7 @@ human correction workflow.
 The fixed artifacts keep experiments reproducible and easy to diff. The web
 viewer supplies the interaction needed for human diagnosis. They are two views
 of one result bundle rather than competing solutions. The framework currently
-implements both views, result/metric JSON, and downloadable reviewer feedback;
-algorithm-selected evidence masks will be added with the algorithm trace
-contract. That trace is defined by the accepted
-[deterministic geometric refinement design](geometric-refinement-v1.md).
+implements both views, result/metric JSON, downloadable reviewer feedback, and
+the initial target/ambiguous/background/ground evidence masks defined by the
+[deterministic geometric refinement design](geometric-refinement-v1.md). Later
+optimization rounds will reuse the same trace contract for reassigned evidence.

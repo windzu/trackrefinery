@@ -28,6 +28,40 @@ class MyRefiner(TrackRefiner):
 belongs to the input track. A successful backend must return exactly one pose
 for every input observation in the same order.
 
+## Inspect the deterministic backend
+
+The first backend currently implements initial point-evidence selection and
+ground estimation. Until joint registration, cuboid fitting, and success gates
+are implemented, it intentionally returns `algorithm_stage_incomplete` rather
+than copying coarse geometry:
+
+```python
+from trackrefinery import JointCuboidRefiner, write_geometric_trace
+
+run = JointCuboidRefiner().refine_with_trace(case)
+assert run.outcome.status == "insufficient_evidence"
+write_geometric_trace("traces/case", run.trace)
+```
+
+Settings are immutable, content-addressed, and internal to the backend:
+
+```python
+from trackrefinery import (
+    EvidenceSelectionSettings,
+    GeometricRefinementSettings,
+    JointCuboidRefiner,
+)
+
+settings = GeometricRefinementSettings(
+    evidence=EvidenceSelectionSettings(roi_margin_xyz_m=(1.1, 1.0, 0.55))
+)
+backend = JointCuboidRefiner(settings)
+print(settings.sha256)
+```
+
+The required caller contract still supplies full frame clouds. These settings
+are versioned algorithm configuration, not a caller-owned crop request.
+
 ## Load source-only input
 
 ```python
@@ -85,13 +119,18 @@ from trackrefinery import build_review_bundle
 
 build_review_bundle(
     case,
-    result,
+    run.outcome,
     "review/run-001/case",
     target=gold,
-    evaluation=report,
+    trace=run.trace,
 )
 ```
 
 The bundle contains fixed aggregate artifacts, orthographic thumbnails,
-metrics, and a self-contained interactive HTML view. Serve it with
+metrics, optional evidence-mask sidecars, and a self-contained interactive
+HTML view. With a trace, initial target, ambiguous, background, and ground
+points can be toggled and inspected independently. Serve it with
 `trackrefinery-review review/run-001/case --open`.
+
+The CLI accepts the same sidecar through
+`trackrefinery-build-review --trace traces/case/evidence_trace.json ...`.

@@ -21,22 +21,50 @@ from trackrefinery.evaluation import (
     evaluate_case,
     evaluate_suite,
 )
+from trackrefinery.geometric import (
+    EVIDENCE_TRACE_CONTRACT,
+    GEOMETRIC_ALGORITHM_VERSION,
+    GEOMETRIC_CONFIG_SCHEMA_VERSION,
+    EvidenceSelectionSettings,
+    EvidenceState,
+    FrameEvidenceTrace,
+    GeometricRefinementRun,
+    GeometricRefinementSettings,
+    GeometricRefinementTrace,
+    GroundPlaneEstimate,
+    JointCuboidRefiner,
+    read_geometric_trace,
+    select_initial_evidence,
+    validate_geometric_trace,
+    write_geometric_trace,
+)
 from trackrefinery.refiner import TrackRefiner, validate_outcome
 from trackrefinery.review import build_review_bundle
 from trackrefinery.serde import read_outcome, write_outcome
 from trackrefinery.targets import GoldFramePose, GoldTarget, TargetDataset
 
 __all__ = [
+    "EVIDENCE_TRACE_CONTRACT",
+    "GEOMETRIC_ALGORITHM_VERSION",
+    "GEOMETRIC_CONFIG_SCHEMA_VERSION",
     "AcceptanceThresholds",
     "BenchmarkReport",
     "Box3D",
     "EvaluationReport",
+    "EvidenceSelectionSettings",
+    "EvidenceState",
     "FrameCloud",
+    "FrameEvidenceTrace",
+    "GeometricRefinementRun",
+    "GeometricRefinementSettings",
+    "GeometricRefinementTrace",
     "GoldFramePose",
     "GoldTarget",
+    "GroundPlaneEstimate",
     "InferenceDataset",
     "InstanceTrack",
     "InsufficientEvidence",
+    "JointCuboidRefiner",
     "ObservationKind",
     "Pose3D",
     "RefinedFramePose",
@@ -49,8 +77,12 @@ __all__ = [
     "build_review_bundle",
     "evaluate_case",
     "evaluate_suite",
+    "read_geometric_trace",
     "read_outcome",
+    "select_initial_evidence",
+    "validate_geometric_trace",
     "validate_outcome",
+    "write_geometric_trace",
     "write_outcome",
 ]
 

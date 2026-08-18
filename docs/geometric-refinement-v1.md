@@ -1,6 +1,6 @@
 # Deterministic Geometric Refinement V1
 
-Status: accepted algorithm design; implementation pending
+Status: accepted algorithm design; initial evidence and trace stages implemented
 
 ## Decision
 
@@ -239,6 +239,11 @@ ill_conditioned_solution
 optimization_not_converged
 ```
 
+`algorithm_stage_incomplete` is a development-only gate used while the backend
+can produce diagnostics but the joint optimizer is not yet capable of a valid
+success. It is removed from normal outcomes once all mandatory V1 stages are
+implemented.
+
 Threshold values are calibration data, not universal truths. They must be
 versioned and selected on a calibration split without tuning on the test split.
 
@@ -285,10 +290,12 @@ tolerances and require no geometry correction in blinded X-Points review.
 
 ## Delivery sequence
 
-1. Add versioned geometric settings, trace types, and a backend that returns
-   explicit insufficient evidence until a hypothesis passes its gate.
-2. Add deterministic evidence selection and ground estimation with review-mask
-   visualization.
+1. **Implemented:** add versioned geometric settings, trace types, and a
+   backend that returns explicit insufficient evidence until a hypothesis
+   passes its gate.
+2. **Implemented:** add deterministic initial evidence selection and ground
+   estimation with review-mask visualization. Point ownership remains an
+   initialization and will be recomputed by later optimization rounds.
 3. Implement robust per-frame registration and canonical shape aggregation.
 4. Implement visible-envelope cuboid fitting and the alternating loop.
 5. Add multi-hypothesis selection, observability, and dropout stability gates.
