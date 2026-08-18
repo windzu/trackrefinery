@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# TrackRefinery local development artifacts. Real or licensed datasets must
+# never be committed; only deterministic fixtures under tests/fixtures belong
+# in git.
+.data/
+checkpoints/
+benchmark-results/

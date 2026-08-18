@@ -1,0 +1,82 @@
+{
+  "canonical_size_lwh": [
+    4.449999809265137,
+    1.8600000143051147,
+    1.6200000047683716
+  ],
+  "case_id": "nearby_clutter",
+  "contract_version": "trackrefinery-gold-target-v1",
+  "expected_refinable": false,
+  "frame_poses": [
+    {
+      "evaluable": true,
+      "frame_id": "000000",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.0649542388347826,
+          0.9978882436713011
+        ],
+        "translation_xyz": [
+          12.0,
+          -0.4000000059604645,
+          0.0
+        ]
+      }
+    },
+    {
+      "evaluable": true,
+      "frame_id": "000001",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.06794760678144589,
+          0.9976888907533622
+        ],
+        "translation_xyz": [
+          11.913533711226153,
+          -0.6103206007627455,
+          0.0
+        ]
+      }
+    },
+    {
+      "evaluable": true,
+      "frame_id": "000002",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.07094036320010681,
+          0.9974805586421407
+        ],
+        "translation_xyz": [
+          11.82524567232074,
+          -0.7567403824300053,
+          0.0
+        ]
+      }
+    },
+    {
+      "evaluable": true,
+      "frame_id": "000003",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.07393248115597777,
+          0.9972632492126244
+        ],
+        "translation_xyz": [
+          11.737576924507962,
+          -0.8342916730231524,
+          0.0
+        ]
+      }
+    }
+  ],
+  "sequence_id": "nearby_clutter",
+  "track_id": "target"
+}

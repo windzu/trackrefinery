@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "case_id": "static_complete",
+      "target_path": "cases/static_complete/target.json"
+    },
+    {
+      "case_id": "moving_complete",
+      "target_path": "cases/moving_complete/target.json"
+    },
+    {
+      "case_id": "robust_outliers",
+      "target_path": "cases/robust_outliers/target.json"
+    },
+    {
+      "case_id": "partial_visibility",
+      "target_path": "cases/partial_visibility/target.json"
+    },
+    {
+      "case_id": "nearby_clutter",
+      "target_path": "cases/nearby_clutter/target.json"
+    },
+    {
+      "case_id": "neighboring_tracks",
+      "target_path": "cases/neighboring_tracks/target.json"
+    },
+    {
+      "case_id": "neighboring_tracks_neighbor",
+      "target_path": "cases/neighboring_tracks_neighbor/target.json"
+    }
+  ],
+  "dataset_id": "synthetic-v1",
+  "format": "trackrefinery-target-dataset",
+  "version": 1
+}
