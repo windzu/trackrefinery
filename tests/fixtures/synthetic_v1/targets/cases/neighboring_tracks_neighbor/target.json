@@ -1,0 +1,82 @@
+{
+  "canonical_size_lwh": [
+    4.900000095367432,
+    2.049999952316284,
+    1.7999999523162842
+  ],
+  "case_id": "neighboring_tracks_neighbor",
+  "contract_version": "trackrefinery-gold-target-v1",
+  "expected_refinable": true,
+  "frame_poses": [
+    {
+      "evaluable": true,
+      "frame_id": "000000",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.034992854604336196,
+          0.9993875625234886
+        ],
+        "translation_xyz": [
+          12.550000190734863,
+          1.9499999284744263,
+          0.09000000357627869
+        ]
+      }
+    },
+    {
+      "evaluable": true,
+      "frame_id": "000001",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.03799085532693704,
+          0.999278086876485
+        ],
+        "translation_xyz": [
+          12.441697987681913,
+          1.7335102682624022,
+          0.09000000357627869
+        ]
+      }
+    },
+    {
+      "evaluable": true,
+      "frame_id": "000002",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.04098851413209638,
+          0.9991596177334445
+        ],
+        "translation_xyz": [
+          12.331510472044009,
+          1.5817838258568813,
+          0.09000000357627869
+        ]
+      }
+    },
+    {
+      "evaluable": true,
+      "frame_id": "000003",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.043985804040905185,
+          0.9990321561605888
+        ],
+        "translation_xyz": [
+          12.221900049558453,
+          1.4997887155130516,
+          0.09000000357627869
+        ]
+      }
+    }
+  ],
+  "sequence_id": "neighboring_tracks",
+  "track_id": "neighbor"
+}

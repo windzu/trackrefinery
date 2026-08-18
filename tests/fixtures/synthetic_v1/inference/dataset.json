@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "case_id": "static_complete",
+      "sequence_id": "static_complete",
+      "track_path": "inputs/static_complete/track.json"
+    },
+    {
+      "case_id": "moving_complete",
+      "sequence_id": "moving_complete",
+      "track_path": "inputs/moving_complete/track.json"
+    },
+    {
+      "case_id": "robust_outliers",
+      "sequence_id": "robust_outliers",
+      "track_path": "inputs/robust_outliers/track.json"
+    },
+    {
+      "case_id": "partial_visibility",
+      "sequence_id": "partial_visibility",
+      "track_path": "inputs/partial_visibility/track.json"
+    },
+    {
+      "case_id": "nearby_clutter",
+      "sequence_id": "nearby_clutter",
+      "track_path": "inputs/nearby_clutter/track.json"
+    },
+    {
+      "case_id": "neighboring_tracks",
+      "sequence_id": "neighboring_tracks",
+      "track_path": "inputs/neighboring_tracks/track.json"
+    },
+    {
+      "case_id": "neighboring_tracks_neighbor",
+      "sequence_id": "neighboring_tracks",
+      "track_path": "inputs/neighboring_tracks_neighbor/track.json"
+    }
+  ],
+  "dataset_id": "synthetic-v1",
+  "format": "trackrefinery-inference-dataset",
+  "generator": {
+    "name": "trackrefinery.synthetic",
+    "seed": 20260819
+  },
+  "sequences": [
+    {
+      "manifest_path": "sources/static_complete/sequence.json",
+      "role": "development",
+      "sequence_id": "static_complete"
+    },
+    {
+      "manifest_path": "sources/moving_complete/sequence.json",
+      "role": "development",
+      "sequence_id": "moving_complete"
+    },
+    {
+      "manifest_path": "sources/robust_outliers/sequence.json",
+      "role": "calibration",
+      "sequence_id": "robust_outliers"
+    },
+    {
+      "manifest_path": "sources/partial_visibility/sequence.json",
+      "role": "calibration",
+      "sequence_id": "partial_visibility"
+    },
+    {
+      "manifest_path": "sources/nearby_clutter/sequence.json",
+      "role": "test",
+      "sequence_id": "nearby_clutter"
+    },
+    {
+      "manifest_path": "sources/neighboring_tracks/sequence.json",
+      "role": "test",
+      "sequence_id": "neighboring_tracks"
+    }
+  ],
+  "version": 1
+}

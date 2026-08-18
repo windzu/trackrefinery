@@ -1,0 +1,92 @@
+# Development Data
+
+## What constitutes one case
+
+One benchmark case is one already-associated instance track. It references
+shared full-frame point clouds, supplies the instance's coarse detection in
+each frame and the exact frame poses, and has a physically separate reviewed
+target containing one canonical size and per-frame reference poses.
+
+The benchmark never uses GT boxes to crop input points. Real coarse boxes must
+come from a frozen detector/tracker profile. Synthetic coarse boxes may be
+generated from known truth with recorded perturbations for controlled tests.
+
+## Tier 1: committed synthetic corpus
+
+The deterministic corpus is safe to commit and must exercise the complete
+contract rather than only object crops:
+
+- moving ego with stationary and moving objects;
+- exact and non-uniform frame timestamps;
+- intentionally biased coarse size, center, height, and yaw;
+- complementary front/side/rear observations;
+- one-sided and sparse evidence that must report insufficient evidence;
+- ground, background outliers, neighboring objects, and overlapping crops;
+- duplicate spatial evidence from multiple upstream channels;
+- non-default annotation-frame names and exact world round trips.
+
+Synthetic data proves coordinate math, optimization behavior, and regressions.
+It cannot qualify real-world geometry accuracy.
+
+## Tier 2: local X-4D corpus
+
+Private operational data lives under ignored `.data/`. The synchronized native
+Clips are immutable source material, not direct benchmark inputs. An exporter
+constructs source-only frame clouds and fixed model track inputs separately
+from reviewed targets.
+
+The current local seed inventory is:
+
+| Clip | Initial purpose | Current limitation |
+|---|---|---|
+| `20260714_G150-004_000` | adapter and smoke test | only one labeled instance |
+| `20260720_G150-004_000` | early calibration | eight labeled instances |
+| `20180830_n008_scene-0757_sweeps_000` | multi-category comparison | one physical test scene |
+| `20260817_G150-002_000` | qualitative failure review | no reviewed geometry target |
+
+These Clips are enough to build and exercise the pipeline, but not enough to
+claim accuracy. The first useful real corpus should contain at least several
+independent Clips and deliberately cover:
+
+- near/mid/far range and dense/sparse returns;
+- full, partial, and one-sided visibility;
+- moving and stationary vehicles with moving ego;
+- close neighbors, occlusion, ground slopes, and background structures;
+- common rigid vehicle categories and unusual dimensions;
+- high-quality coarse tracks and visibly biased coarse tracks.
+
+Every real case records source Clip identity, source revision, point
+materialization identity, detector checkpoint, tracker/profile identity, and
+exporter version. Coarse predictions are immutable benchmark input; rerunning a
+new detector creates a different input suite.
+
+## Gold-target preparation
+
+Existing annotation is a candidate target, not automatically gold. Selected
+tracks need a dedicated X-Points review in which one canonical instance size
+and all evaluated frame poses are corrected together. The reviewer also marks:
+
+- frames with sufficient visual/point evidence for pose evaluation;
+- tracks whose physical extent cannot be established from available data;
+- ambiguous category, articulation, truncation, or association problems;
+- whether a result at the final tolerance would require any manual correction.
+
+Gold targets are versioned and never passed to the refiner.
+
+## Tier 3: reproducible public benchmarks
+
+Provide adapters and split manifests for user-downloaded nuScenes and Argoverse
+2 Sensor data. Do not redistribute third-party sensor assets. Public labels
+still require filtering for tracks whose geometry is consistent enough to act
+as a refinement target.
+
+## Split discipline
+
+- `development`: algorithm debugging; results may guide implementation;
+- `calibration`: diagnostic/insufficient-evidence thresholds only;
+- `test`: locked comparison after a version is frozen;
+- `qualitative`: visual failures without metric claims.
+
+Split by physical sequence, never by track or frame. A test failure may be
+added to a future development split only in a new benchmark version; the
+current locked result remains recorded.

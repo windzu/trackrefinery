@@ -1,0 +1,174 @@
+{
+  "contract_version": "trackrefinery-frame-sequence-v1",
+  "feature_names": [
+    "intensity"
+  ],
+  "frames": [
+    {
+      "annotation_frame_id": "synthetic_base",
+      "frame_id": "000000",
+      "points_path": "frames/000000.npz",
+      "sensor_origins": {
+        "lidar_front": [
+          -1.5,
+          0.0,
+          1.9
+        ],
+        "lidar_left": [
+          0.0,
+          0.85,
+          1.75
+        ]
+      },
+      "timestamp_ns": 1700000000000000000,
+      "world_from_annotation": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "translation_xyz": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "annotation_frame_id": "synthetic_base",
+      "frame_id": "000001",
+      "points_path": "frames/000001.npz",
+      "sensor_origins": {
+        "lidar_front": [
+          -1.5,
+          0.0,
+          1.9
+        ],
+        "lidar_left": [
+          0.0,
+          0.85,
+          1.75
+        ]
+      },
+      "timestamp_ns": 1700000000107000000,
+      "world_from_annotation": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.0059999640000648,
+          0.999982000054
+        ],
+        "translation_xyz": [
+          0.48,
+          0.06731767878463173,
+          0.0
+        ]
+      }
+    },
+    {
+      "annotation_frame_id": "synthetic_base",
+      "frame_id": "000002",
+      "points_path": "frames/000002.npz",
+      "sensor_origins": {
+        "lidar_front": [
+          -1.5,
+          0.0,
+          1.9
+        ],
+        "lidar_left": [
+          0.0,
+          0.85,
+          1.75
+        ]
+      },
+      "timestamp_ns": 1700000000200000000,
+      "world_from_annotation": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.011999712002073594,
+          0.9999280008639958
+        ],
+        "translation_xyz": [
+          0.96,
+          0.07274379414605454,
+          0.0
+        ]
+      }
+    },
+    {
+      "annotation_frame_id": "synthetic_base",
+      "frame_id": "000003",
+      "points_path": "frames/000003.npz",
+      "sensor_origins": {
+        "lidar_front": [
+          -1.5,
+          0.0,
+          1.9
+        ],
+        "lidar_left": [
+          0.0,
+          0.85,
+          1.75
+        ]
+      },
+      "timestamp_ns": 1700000000321000000,
+      "world_from_annotation": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.01799902801574628,
+          0.9998380043739528
+        ],
+        "translation_xyz": [
+          1.44,
+          0.011289600644789377,
+          0.0
+        ]
+      }
+    },
+    {
+      "annotation_frame_id": "synthetic_base",
+      "frame_id": "000004",
+      "points_path": "frames/000004.npz",
+      "sensor_origins": {
+        "lidar_front": [
+          -1.5,
+          0.0,
+          1.9
+        ],
+        "lidar_left": [
+          0.0,
+          0.85,
+          1.75
+        ]
+      },
+      "timestamp_ns": 1700000000400000000,
+      "world_from_annotation": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.02399769606635429,
+          0.9997120138237345
+        ],
+        "translation_xyz": [
+          1.92,
+          -0.06054419962463426,
+          0.0
+        ]
+      }
+    }
+  ],
+  "sensors": [
+    {
+      "modality": "lidar",
+      "sensor_id": "lidar_front"
+    },
+    {
+      "modality": "lidar",
+      "sensor_id": "lidar_left"
+    }
+  ],
+  "sequence_id": "robust_outliers"
+}

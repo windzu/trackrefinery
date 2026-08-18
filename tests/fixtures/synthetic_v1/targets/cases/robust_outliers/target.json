@@ -1,0 +1,99 @@
+{
+  "canonical_size_lwh": [
+    4.449999809265137,
+    1.8600000143051147,
+    1.6200000047683716
+  ],
+  "case_id": "robust_outliers",
+  "contract_version": "trackrefinery-gold-target-v1",
+  "expected_refinable": true,
+  "frame_poses": [
+    {
+      "evaluable": true,
+      "frame_id": "000000",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.0649542388347826,
+          0.9978882436713011
+        ],
+        "translation_xyz": [
+          12.0,
+          -0.4000000059604645,
+          0.0
+        ]
+      }
+    },
+    {
+      "evaluable": true,
+      "frame_id": "000001",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.06794760678144589,
+          0.9976888907533622
+        ],
+        "translation_xyz": [
+          11.813541483303144,
+          -0.6091206364288284,
+          0.0
+        ]
+      }
+    },
+    {
+      "evaluable": true,
+      "frame_id": "000002",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.07094036320010681,
+          0.9974805586421407
+        ],
+        "translation_xyz": [
+          11.625303460235928,
+          -0.7519408477939317,
+          0.0
+        ]
+      }
+    },
+    {
+      "evaluable": true,
+      "frame_id": "000003",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.07393248115597777,
+          0.9972632492126244
+        ],
+        "translation_xyz": [
+          11.43777111290239,
+          -0.8234939988070197,
+          0.0
+        ]
+      }
+    },
+    {
+      "evaluable": true,
+      "frame_id": "000004",
+      "pose": {
+        "orientation_xyzw": [
+          0.0,
+          0.0,
+          0.07692393372001737,
+          0.9970369644205969
+        ],
+        "translation_xyz": [
+          11.25072012167329,
+          -0.8802969301618593,
+          0.0
+        ]
+      }
+    }
+  ],
+  "sequence_id": "robust_outliers",
+  "track_id": "target"
+}

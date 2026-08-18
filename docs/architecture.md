@@ -1,0 +1,78 @@
+# Architecture
+
+## Goal and unit of work
+
+TrackRefinery refines one already-associated rigid-object track. Its input is
+the sequence of full scene point clouds containing that object, the object's
+coarse detection in each input frame, and exact frame poses. Its output is one
+canonical `(length, width, height)` plus a refined object pose for every input
+observation.
+
+The public algorithm unit is one instance track. A batch runner may share the
+same immutable frame-cloud objects across many tracks, but that is an execution
+optimization rather than a change to the refinement contract.
+
+```text
+upstream detector and tracker
+  -> full frame clouds + one associated detection track + frame poses
+  -> TrackRefinery selects enlarged evidence regions
+  -> joint canonical geometry and per-frame pose refinement
+  -> canonical size + refined poses + diagnostics
+  -> caller decides whether and how to publish the result
+```
+
+## Boundaries
+
+The core begins after synchronization, calibration, per-frame multi-sensor
+fusion, detection, and track association. In every frame, all selected LiDAR
+points and the coarse detection use that frame's declared annotation frame.
+The input also carries the exact transform from that annotation frame to a
+shared sequence/world frame. This keeps the core independent of vehicle layout,
+topic names, frame rate, and bag format without discarding the pose information
+required for temporal aggregation.
+
+The caller supplies full frame clouds, not a pre-cropped object tensor and not
+a crop-margin setting. TrackRefinery owns enlarged evidence-region selection,
+target/background separation, multi-frame canonicalization, geometry fitting,
+and pose refinement. It may expose internal evidence masks for diagnostics, but
+those masks are not required input.
+
+The core does not read annotations from the input tree. Evaluation targets live
+under a separate tree and are opened only by benchmark code. This prevents a
+backend from accidentally consuming labels when a labeled clip is reused for
+inference.
+
+Detection, association, track lifecycle, gap filling, head/tail extrapolation,
+sensor fusion, calibration, and Clip candidate construction are outside the
+library. X-4D/MMDetection3D integration is an adapter. Automatic release is a
+caller policy, not a TrackRefinery decision.
+
+Each successful rigid-instance result has one canonical size shared exactly by
+all refined frame poses. A future articulated-object extension must be explicit
+rather than weakening this invariant. If the evidence cannot support the
+required accuracy, the operation returns a typed insufficient-evidence outcome
+with diagnostics; it must not silently return coarse boxes as refined output.
+
+## Extension points
+
+- `FrameCloudStore`: immutable, shareable full-frame point evidence.
+- `TrackRefiner`: single-instance geometry and pose refinement.
+- `DatasetAdapter`: source-specific construction of frame clouds, detections,
+  and frame poses.
+- `ResultAdapter`: translation into a caller's box/annotation representation.
+- `Evaluator`: development-only comparison with physically separate targets.
+
+## Algorithm boundary
+
+The framework deliberately selects no crop, segmentation, aggregation,
+geometry-fit, or pose-optimization algorithm. Those decisions follow a separate
+design review. A backend may be geometric, learned, or hybrid, but it receives
+the same full-frame evidence and must return the same validated success or
+insufficient-evidence outcome.
+
+## Integration direction
+
+MMDetection3D may call TrackRefinery once per associated track while reusing its
+already loaded full-frame point tensors. X-4D continues to supply and receive a
+complete Clip through the existing preannotation protocol. TrackRefinery itself
+must not import either project or introduce a second X-4D service protocol.
