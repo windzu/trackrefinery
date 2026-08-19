@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
@@ -41,10 +41,11 @@ def select_object_components(
     """Select one non-ground spatial component in every track observation."""
 
     resolved = settings or ComponentConsensusSettings()
-    frames = tuple(
+    provisional_frames = tuple(
         _select_frame_component(frame, observation.coarse_box, resolved)
         for frame, observation in zip(case.frames, case.track.observations, strict=True)
     )
+    frames = _apply_track_relative_frame_roles(provisional_frames, resolved)
     return GeometricRefinementTrace(
         case_id=case.case_id,
         track_id=case.track.track_id,
@@ -128,6 +129,7 @@ def _select_frame_component(
             nearest_competing_distance_m=None,
             robust_spread_xyz_m=None,
             resolution_stability_iou=None,
+            outside_coarse_envelope_fraction=None,
         )
     else:
         selected_positions = primary.component_positions[primary.selected_id]
@@ -150,6 +152,17 @@ def _select_frame_component(
         )
         dominance = selected_seed_count / total_candidate_seed_count
         spread = _robust_spread(roi_local[selected_positions], settings.spread_quantile)
+        purity_half_size = half_size + np.asarray(
+            settings.purity_envelope_allowance_xyz_m
+        )
+        outside_envelope_fraction = float(
+            np.mean(
+                np.any(
+                    np.abs(roi_local[selected_positions]) > purity_half_size + 1e-9,
+                    axis=1,
+                )
+            )
+        )
         competitor_distance = _nearest_competing_distance(
             roi_local,
             primary,
@@ -164,10 +177,21 @@ def _select_frame_component(
                 strict=True,
             )
         )
-        if component_too_broad:
+        component_exits_envelope = (
+            outside_envelope_fraction > settings.maximum_outside_envelope_fraction
+        )
+        if component_too_broad or component_exits_envelope:
             status = "ambiguous"
             role = FrameRole.TRAJECTORY_ONLY
-            reasons = ("component_not_separable",)
+            reasons = tuple(
+                reason
+                for condition, reason in (
+                    (True, "component_not_separable"),
+                    (component_too_broad, "component_spread_too_broad"),
+                    (component_exits_envelope, "component_exits_coarse_envelope"),
+                )
+                if condition
+            )
         else:
             status = "selected"
             states[selected_positions] = EvidenceState.TARGET.value
@@ -194,6 +218,7 @@ def _select_frame_component(
             nearest_competing_distance_m=competitor_distance,
             robust_spread_xyz_m=spread,
             resolution_stability_iou=stability,
+            outside_coarse_envelope_fraction=outside_envelope_fraction,
         )
     return FrameEvidenceTrace(
         frame_id=frame.frame_id,
@@ -303,7 +328,23 @@ def _classify_frame_role(
     stability: float,
     has_ground: bool,
     settings: ComponentConsensusSettings,
+    reference_point_count: float | None = None,
+    reference_spread: tuple[float, float, float] | None = None,
 ) -> tuple[FrameRole, tuple[str, ...]]:
+    relative_point_check = (
+        True
+        if reference_point_count is None
+        else point_count
+        >= reference_point_count * settings.geometry_minimum_relative_points
+    )
+    relative_spread_check = (
+        True
+        if reference_spread is None
+        else all(
+            actual >= reference * settings.geometry_minimum_relative_spread
+            for actual, reference in zip(spread, reference_spread, strict=True)
+        )
+    )
     geometry_checks = (
         point_count >= settings.geometry_minimum_points,
         voxel_count >= settings.geometry_minimum_voxels,
@@ -316,6 +357,8 @@ def _classify_frame_role(
         dominance >= settings.geometry_minimum_dominance,
         stability >= settings.geometry_minimum_stability_iou,
         has_ground,
+        relative_point_check,
+        relative_spread_check,
     )
     if all(geometry_checks):
         return FrameRole.GEOMETRY, ()
@@ -343,10 +386,81 @@ def _classify_frame_role(
         reasons.append("insufficient_geometry_spread")
     if not has_ground:
         reasons.append("ground_support_unavailable")
+    if not relative_point_check:
+        reasons.append("insufficient_relative_component_points")
+    if not relative_spread_check:
+        reasons.append("insufficient_relative_geometry_spread")
     return (
         (FrameRole.POSE_ONLY if all(pose_checks) else FrameRole.TRAJECTORY_ONLY),
         tuple(reasons),
     )
+
+
+def _apply_track_relative_frame_roles(
+    frames: tuple[FrameEvidenceTrace, ...],
+    settings: ComponentConsensusSettings,
+) -> tuple[FrameEvidenceTrace, ...]:
+    """Keep only dense, relatively complete frames as geometry authority.
+
+    Absolute point thresholds reject globally sparse observations. Relative
+    thresholds then compare each selected component with the best-supported
+    views of the same rigid instance, avoiding category or dimension priors.
+    """
+
+    selected = [
+        frame.component
+        for frame in frames
+        if frame.component is not None
+        and frame.component.status == "selected"
+        and frame.component.robust_spread_xyz_m is not None
+    ]
+    if not selected:
+        return frames
+    reference_point_count = float(
+        np.quantile(
+            [component.selected_point_count for component in selected],
+            settings.geometry_reference_quantile,
+        )
+    )
+    reference_spread_array = np.quantile(
+        np.asarray(
+            [component.robust_spread_xyz_m for component in selected],
+            dtype=np.float64,
+        ),
+        settings.geometry_reference_quantile,
+        axis=0,
+    )
+    reference_spread = tuple(float(value) for value in reference_spread_array)
+    updated: list[FrameEvidenceTrace] = []
+    for frame in frames:
+        component = frame.component
+        if (
+            component is None
+            or component.status != "selected"
+            or component.robust_spread_xyz_m is None
+            or component.component_dominance is None
+            or component.resolution_stability_iou is None
+        ):
+            updated.append(frame)
+            continue
+        role, reasons = _classify_frame_role(
+            point_count=component.selected_point_count,
+            voxel_count=component.selected_voxel_count,
+            spread=component.robust_spread_xyz_m,
+            dominance=component.component_dominance,
+            stability=component.resolution_stability_iou,
+            has_ground=frame.ground_plane is not None,
+            settings=settings,
+            reference_point_count=reference_point_count,
+            reference_spread=reference_spread,
+        )
+        updated.append(
+            replace(
+                frame,
+                component=replace(component, frame_role=role, reason_codes=reasons),
+            )
+        )
+    return tuple(updated)
 
 
 def _robust_spread(

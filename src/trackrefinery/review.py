@@ -114,6 +114,26 @@ def _frame_role_counts(
     return counts
 
 
+def _dense_scope_summary(
+    outcome: RefinementOutcome,
+    trace: GeometricRefinementTrace | None,
+) -> tuple[bool | None, int | None]:
+    if trace is None or trace.stage != "component_selection_v2":
+        return None, None
+    diagnostics = getattr(outcome, "diagnostics", None)
+    supported = (
+        diagnostics.get("dense_track_supported")
+        if isinstance(diagnostics, Mapping)
+        else None
+    )
+    selected_points = sum(
+        frame.count(EvidenceState.TARGET)
+        for frame in trace.frames
+        if frame.component is not None
+    )
+    return (supported if isinstance(supported, bool) else None), selected_points
+
+
 def build_review_bundle(
     case: RefinementCase,
     outcome: RefinementOutcome,
@@ -366,6 +386,9 @@ def build_review_bundle(
         evaluation.write_json(output / "metrics.json")
     if trace is not None:
         write_geometric_trace(output, trace)
+    dense_track_supported, selected_component_point_count = _dense_scope_summary(
+        outcome, trace
+    )
     bundle_manifest = {
         "contract_version": "trackrefinery-review-bundle-v1",
         "case_id": case.case_id,
@@ -387,6 +410,8 @@ def build_review_bundle(
         "has_evidence_trace": trace is not None,
         "algorithm_stage": None if trace is None else trace.stage,
         "frame_role_counts": _frame_role_counts(trace),
+        "dense_track_supported": dense_track_supported,
+        "selected_component_point_count": selected_component_point_count,
         "has_registration_trace": canonical_shape is not None,
         "has_input_track_comparison": has_input_track_comparison,
         "has_cuboid_candidate": (
@@ -503,6 +528,13 @@ def build_clip_review_suite(
                     "model_candidate_baseline": 1,
                     "source_annotation_reference": 2,
                 }.get(str(row.get("review_mode")), 3),
+                0 if row.get("dense_track_supported") is True else 1,
+                -int(
+                    (row.get("frame_role_counts") or {}).get("geometry", 0)
+                    if isinstance(row.get("frame_role_counts"), dict)
+                    else 0
+                ),
+                -int(row.get("selected_component_point_count") or 0),
                 -int(row.get("frame_count") or 0),
                 str(row.get("category") or ""),
                 str(row["case_id"]),
@@ -592,6 +624,10 @@ def _review_bundle_index_row(
         "detail_level": manifest.get("detail_level", "full"),
         "algorithm_stage": algorithm_stage,
         "frame_role_counts": manifest.get("frame_role_counts"),
+        "dense_track_supported": manifest.get("dense_track_supported"),
+        "selected_component_point_count": manifest.get(
+            "selected_component_point_count"
+        ),
         "has_gold_aligned_aggregate": manifest.get("has_gold_aligned_aggregate", False),
         "cuboid_candidate_size_lwh": manifest.get("cuboid_candidate_size_lwh"),
         "preview_path": (relative / "preview.html").as_posix(),
@@ -753,6 +789,12 @@ def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
     .instance-card p {{ margin: 7px 0 0; color: #94a3b8; font-size: 12px; }}
     .instance-card .mode {{ color: #cbd5e1; }}
     .release-warning {{ color: #fca5a5 !important; font-weight: 700; }}
+    .scope-badge {{ display: inline-block; margin: 7px 0 0; border-radius: 999px;
+      padding: 4px 8px; font-size: 11px; font-weight: 800; }}
+    .scope-dense {{ color: #86efac; border: 1px solid #22c55e;
+      background: rgba(34,197,94,.10); }}
+    .scope-sparse {{ color: #cbd5e1; border: 1px solid #64748b;
+      background: rgba(100,116,139,.10); }}
     dialog {{ width: min(1500px, 96vw); height: 94vh; padding: 0;
       border: 1px solid #475569; border-radius: 10px; background: #111827; }}
     dialog::backdrop {{ background: rgba(0,0,0,.75); }}
@@ -831,6 +873,16 @@ def _clip_instance_card(instance: object) -> str:
             f"{name} {int(frame_roles.get(name, 0))}"
             for name in ("geometry", "pose_only", "trajectory_only")
         )
+    dense_supported = instance.get("dense_track_supported")
+    if dense_supported is True:
+        scope_badge = '<span class="scope-badge scope-dense">DENSE MVP INPUT</span>'
+    elif dense_supported is False:
+        scope_badge = (
+            '<span class="scope-badge scope-sparse">'
+            "OUT OF CURRENT DENSE MVP SCOPE</span>"
+        )
+    else:
+        scope_badge = ""
     presentation = REVIEW_MODE_PRESENTATION[mode]
     if mode == "algorithm_candidate":
         release_label = (
@@ -912,6 +964,9 @@ def _clip_instance_card(instance: object) -> str:
         if mode == "algorithm_candidate" and status != "success"
         else ""
     )
+    selected_component_point_count = html_module.escape(
+        str(instance.get("selected_component_point_count") or 0)
+    )
     return (
         f'<article class="{card_class} mode-{html_module.escape(mode)}" '
         f'data-review-mode="{html_module.escape(mode, quote=True)}" '
@@ -919,6 +974,7 @@ def _clip_instance_card(instance: object) -> str:
         f'{html_module.escape(json.dumps(case_id), quote=True)})">'
         f'<span class="mode-badge mode-{html_module.escape(mode)}">'
         f"{html_module.escape(str(presentation['badge']))}</span>"
+        f"{scope_badge}"
         '<div class="instance-head">'
         f"<div><strong>{html_module.escape(category)}</strong>"
         f"<small>{html_module.escape(track_id)}</small></div>"
@@ -928,7 +984,9 @@ def _clip_instance_card(instance: object) -> str:
         f"{release_warning}"
         f"<p>{html_module.escape(algorithm_stage)}"
         f"{(' · ' + html_module.escape(role_label)) if role_label else ''}</p>"
-        f"<p>{frame_count} frames · {point_count} displayed points</p>"
+        f"<p>{frame_count} frames · {point_count} displayed points · "
+        f"{selected_component_point_count} "
+        "selected component points</p>"
         f"<p>{html_module.escape(size_label)}</p></article>"
     )
 

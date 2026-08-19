@@ -50,6 +50,7 @@ class FrameComponentTrace:
     nearest_competing_distance_m: float | None
     robust_spread_xyz_m: tuple[float, float, float] | None
     resolution_stability_iou: float | None
+    outside_coarse_envelope_fraction: float | None
 
     def __post_init__(self) -> None:
         if self.status not in {"selected", "ambiguous", "insufficient_evidence"}:
@@ -103,6 +104,7 @@ class FrameComponentTrace:
                     self.component_dominance,
                     self.robust_spread_xyz_m,
                     self.resolution_stability_iou,
+                    self.outside_coarse_envelope_fraction,
                 )
             ):
                 raise ValueError("insufficient component cannot carry selected metrics")
@@ -118,6 +120,10 @@ class FrameComponentTrace:
         for name, value in (
             ("component_dominance", self.component_dominance),
             ("resolution_stability_iou", self.resolution_stability_iou),
+            (
+                "outside_coarse_envelope_fraction",
+                self.outside_coarse_envelope_fraction,
+            ),
         ):
             if value is not None and (
                 not np.isfinite(value) or not 0.0 <= value <= 1.0
@@ -160,6 +166,7 @@ class FrameComponentTrace:
                 else list(self.robust_spread_xyz_m)
             ),
             "resolution_stability_iou": self.resolution_stability_iou,
+            "outside_coarse_envelope_fraction": (self.outside_coarse_envelope_fraction),
         }
 
     @classmethod
@@ -211,6 +218,10 @@ class FrameComponentTrace:
             resolution_stability_iou=_optional_number(
                 value.get("resolution_stability_iou"),
                 "resolution_stability_iou",
+            ),
+            outside_coarse_envelope_fraction=_optional_number(
+                value.get("outside_coarse_envelope_fraction"),
+                "outside_coarse_envelope_fraction",
             ),
         )
 

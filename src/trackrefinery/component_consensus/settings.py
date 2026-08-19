@@ -9,7 +9,7 @@ from math import isfinite
 
 COMPONENT_CONSENSUS_ALGORITHM_VERSION = "component-consensus-refiner-v2"
 COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION = (
-    "trackrefinery-component-consensus-settings-v1"
+    "trackrefinery-component-consensus-settings-v2"
 )
 
 
@@ -63,11 +63,20 @@ class ComponentConsensusSettings:
         0.4,
         0.4,
     )
-    geometry_minimum_points: int = 80
-    geometry_minimum_voxels: int = 20
+    purity_envelope_allowance_xyz_m: tuple[float, float, float] = (0.35, 0.25, 0.25)
+    maximum_outside_envelope_fraction: float = 0.02
+    # The first supported MVP slice is deliberately dense. Sparse components
+    # may still be useful for a later fixed-shape pose pass, but they must not
+    # define canonical geometry.
+    geometry_minimum_points: int = 1_000
+    geometry_minimum_voxels: int = 100
     geometry_minimum_spread_xyz_m: tuple[float, float, float] = (0.9, 0.45, 0.45)
     geometry_minimum_dominance: float = 0.6
     geometry_minimum_stability_iou: float = 0.65
+    geometry_reference_quantile: float = 0.8
+    geometry_minimum_relative_points: float = 0.2
+    geometry_minimum_relative_spread: float = 0.65
+    track_minimum_geometry_frames: int = 5
     pose_minimum_points: int = 24
     pose_minimum_voxels: int = 8
     pose_minimum_horizontal_spread_m: float = 0.25
@@ -98,6 +107,14 @@ class ComponentConsensusSettings:
                 "maximum_selected_spread_allowance_xyz_m",
             ),
         )
+        object.__setattr__(
+            self,
+            "purity_envelope_allowance_xyz_m",
+            _triplet(
+                self.purity_envelope_allowance_xyz_m,
+                "purity_envelope_allowance_xyz_m",
+            ),
+        )
         for name in (
             "ground_candidate_below_bottom_m",
             "ground_candidate_above_bottom_m",
@@ -120,10 +137,19 @@ class ComponentConsensusSettings:
             "ground_min_inlier_fraction",
             "geometry_minimum_dominance",
             "geometry_minimum_stability_iou",
+            "geometry_minimum_relative_points",
+            "geometry_minimum_relative_spread",
+            "maximum_outside_envelope_fraction",
             "pose_minimum_dominance",
             "pose_minimum_stability_iou",
         ):
             object.__setattr__(self, name, _fraction(getattr(self, name), name))
+        reference_quantile = _fraction(
+            self.geometry_reference_quantile, "geometry_reference_quantile"
+        )
+        if reference_quantile == 0:
+            raise ValueError("geometry_reference_quantile must be greater than zero")
+        object.__setattr__(self, "geometry_reference_quantile", reference_quantile)
         quantile = float(self.spread_quantile)
         if not isfinite(quantile) or not 0 < quantile < 0.5:
             raise ValueError("spread_quantile must be in (0, 0.5)")
@@ -136,6 +162,7 @@ class ComponentConsensusSettings:
             ("minimum_seed_points", 1),
             ("geometry_minimum_points", 1),
             ("geometry_minimum_voxels", 1),
+            ("track_minimum_geometry_frames", 1),
             ("pose_minimum_points", 1),
             ("pose_minimum_voxels", 1),
         ):
