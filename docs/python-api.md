@@ -28,15 +28,14 @@ class MyRefiner(TrackRefiner):
 belongs to the input track. A successful backend must return exactly one pose
 for every input observation in the same order.
 
-## Inspect the deterministic backend
+## Inspect the legacy V1 backend
 
-The first backend currently implements initial point-evidence selection,
-ground estimation, robust per-frame upright registration, and persistent
-canonical shape aggregation. It now also alternates cross-frame evidence
-reassignment and visible-envelope cuboid fitting. Until multi-hypothesis,
-observability, stability, and success gates are implemented, it intentionally
+`JointCuboidRefiner` implements the rejected V1 experiment: initial
+point-evidence selection, ground estimation, all-frame upright registration,
+canonical shape aggregation, evidence reassignment, and visible-envelope
+fitting. It is retained to reproduce the real-data regression and intentionally
 returns `algorithm_stage_incomplete` rather than publishing provisional
-geometry:
+geometry. The accepted V2 component-consensus backend is not implemented yet:
 
 ```python
 from trackrefinery import JointCuboidRefiner, write_geometric_trace

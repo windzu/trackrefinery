@@ -1,8 +1,7 @@
 # Evaluation and Review Design
 
-Status: framework, alternating evidence/registration/envelope previews
-implemented; success-gate diagnostics and correction tolerances remain to be
-calibrated
+Status: framework and legacy V1 previews implemented; V2 component, frame-role,
+and fixed-size comparison diagnostics remain to be implemented
 
 ## What “good” means
 
@@ -38,13 +37,12 @@ Per-frame pose:
 
 Evidence/robustness diagnostics:
 
-- target, ambiguous, background, and ground point counts per frame;
-- observed-side/view-direction coverage;
-- registration residual and supported outer-envelope residual;
-- free-space and ground-contact violations when the required provenance is
-  available;
-- leave-one-frame-out size and pose stability;
-- supported sensor-dropout stability and numerical conditioning;
+- selected and rejected component point counts per frame;
+- geometry, pose-only, and trajectory-only frame roles;
+- selected-component alignment and temporal trajectory residuals;
+- axis-wise aggregate spread and voxel concentration before/after;
+- ground-contact consistency;
+- geometry-frame leave-one-out size stability;
 - change from the coarse initialization;
 - runtime and peak memory.
 
@@ -162,13 +160,15 @@ The fixed artifacts keep experiments reproducible and easy to diff. The web
 viewer supplies the interaction needed for human diagnosis. They are two views
 of one result bundle rather than competing solutions. The framework currently
 implements both views, result/metric JSON, downloadable reviewer feedback, and
-the current target/ambiguous/background/ground evidence masks defined by the
-[deterministic geometric refinement design](geometric-refinement-v1.md). It now
-also exports provisional registered poses, a canonical point shape colored by
-cross-frame support, and the trace-only visible-envelope size candidate. Every
-bundle names its data source so a generated fixture cannot be mistaken for a
-real Clip. Candidate geometry is visibly marked as not released until the
-success gate exists.
+the legacy V1 target/ambiguous/background/ground traces. It also exports V1
+provisional poses, a canonical point shape, and its trace-only envelope
+candidate so the rejected behavior remains reproducible. V2 will replace those
+algorithm diagnostics with selected components, frame roles, anchored
+aggregation decisions, fixed-size poses, and explicit baseline-regression
+checks as specified by the [V2 design](geometric-refinement-v2.md). Every bundle
+names its data source so a generated fixture cannot be mistaken for a real
+Clip. Candidate geometry is visibly marked as not released until the success
+gate exists.
 
 Complete synthetic regression runs additionally contain `suite.json` and
 `index.html`. Their index exposes every case as a top-level tab, while each

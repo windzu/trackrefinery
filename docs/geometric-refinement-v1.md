@@ -1,7 +1,14 @@
 # Deterministic Geometric Refinement V1
 
-Status: accepted algorithm design; evidence, registration, visible-envelope,
-and alternating trace stages implemented
+Status: rejected experimental design; implementation retained only as a
+trace-only regression baseline
+
+> V1 is no longer the current algorithm design. Real same-instance review
+> showed that its all-frame point-to-plane registration could reduce local
+> residuals while increasing aggregate width and shape smearing. Do not extend
+> this design by tuning thresholds or completing its former roadmap. The
+> accepted replacement is
+> [Component-Consensus Geometric Refinement V2](geometric-refinement-v2.md).
 
 ## Decision
 
