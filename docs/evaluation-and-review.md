@@ -196,6 +196,11 @@ released and must not visually resemble an accepted annotation result. A
 successful outcome remains a candidate for caller review; the catalog never
 claims that it has been released.
 
+During the dense-first MVP, algorithm cards also state whether the instance
+passes the current dense-track gate. Dense-supported cards sort before
+out-of-scope sparse cards inside each Clip, but the catalog continues to show
+every instance; scope filtering must not hide failures or sparse evidence.
+
 Catalog cards name their alignment source. A frozen model track may be shown
 as a coarse-track baseline before refinement. Current source annotations may
 be shown as an annotation-aligned reference, but are explicitly marked as not

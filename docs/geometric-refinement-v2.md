@@ -127,6 +127,15 @@ target. A candidate that cannot be separated from a neighbor remains
 ambiguous. V2 returns insufficient evidence rather than merging components or
 allowing all ROI points to enter registration.
 
+For the dense-first profile, a selected connected component also has to remain
+inside a deliberately loose coarse-box envelope. The current envelope adds
+`(0.35, 0.25, 0.25)` metres to the box half-extents in local length, width, and
+height, and permits at most 2% of selected points outside it. Exceeding that
+limit does not crop away the inconvenient points: the entire frame becomes
+`component_not_separable` with `component_exits_coarse_envelope`. This catches
+dense components connected to a wall, curb, or neighboring object without
+pretending the retained interior is known to be pure.
+
 This stage produces a selected point index set and component diagnostics for
 each frame. Those exact indices are preserved through baseline/candidate visual
 comparison so an apparent improvement cannot be manufactured by changing the
@@ -154,6 +163,28 @@ A track needs multiple geometry frames with complementary spatial support.
 Low-quality frames cannot vote on canonical dimensions. If any required output
 frame is neither geometrically refinable nor safely bracketed by reliable
 trajectory estimates, the whole result is insufficient evidence.
+
+### Dense-first MVP scope
+
+The first implemented profile intentionally supports point-rich instances
+before sparse targets. A `geometry` frame must pass both absolute evidence
+requirements and same-track relative requirements. The relative reference is
+the configured upper quantile of selected-component point counts and robust
+axis spreads from that one track; it is not a category-size prior.
+
+The current default profile requires at least 1,000 selected points, 100
+occupied component voxels, at least 20% of the track's 80th-percentile point
+support, at least 65% of its 80th-percentile spread on every axis, and five
+qualifying geometry frames in the track. Frames that have a valid component
+but miss this geometry gate remain `pose_only` when their evidence permits.
+Tracks below the five-frame gate report `dense_track_out_of_scope` and do not
+advance to canonical aggregation during this MVP.
+
+This is a development-scope gate, not a claim that 999 points are physically
+insufficient. The thresholds are versioned in
+`trackrefinery-component-consensus-settings-v2`; sparse-track support will be a
+separate calibration and implementation task after dense-track refinement is
+usable.
 
 ## Stage 3: anchored component aggregation
 

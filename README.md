@@ -32,6 +32,14 @@ selection stability, conservative merged-component rejection, and provisional
 `insufficient_evidence` until aggregation, canonical size, fixed-size pose
 refinement, and acceptance gates are implemented.
 
+The current default is a dense-first MVP profile. Only same-track frames with
+at least 1,000 selected component points and strong relative spatial support
+may define geometry, and a track needs five such frames. Sparse tracks remain
+visible in diagnostics as `dense_track_out_of_scope`; they are not silently
+fed into the future size estimator. A dense component that materially exits a
+loose coarse-box envelope is rejected as inseparable instead of being cropped
+to manufacture a clean-looking target.
+
 The existing `JointCuboidRefiner` implements the rejected
 [V1 experimental design](docs/geometric-refinement-v1.md). It is retained as a
 trace-only regression baseline and always returns `insufficient_evidence`;

@@ -46,7 +46,12 @@ class ComponentConsensusRefiner(TrackRefiner):
             role_counts[frame.component.frame_role.value] += 1
             if frame.component.status != "selected":
                 reasons.append(f"component_not_separable:{frame.frame_id}")
-        if role_counts[FrameRole.GEOMETRY.value] < 2:
+        dense_track_supported = (
+            role_counts[FrameRole.GEOMETRY.value]
+            >= self.settings.track_minimum_geometry_frames
+        )
+        if not dense_track_supported:
+            reasons.append("dense_track_out_of_scope")
             reasons.append("insufficient_geometry_frames")
         outcome = InsufficientEvidence(
             track_id=case.track.track_id,
@@ -56,6 +61,11 @@ class ComponentConsensusRefiner(TrackRefiner):
                 "config_schema_version": trace.config_schema_version,
                 "config_sha256": trace.config_sha256,
                 "stage": trace.stage,
+                "development_scope": "dense_instances_only",
+                "dense_track_supported": dense_track_supported,
+                "track_minimum_geometry_frames": (
+                    self.settings.track_minimum_geometry_frames
+                ),
                 "frame_role_counts": role_counts,
                 "frames": [frame.to_summary_dict() for frame in trace.frames],
             },
