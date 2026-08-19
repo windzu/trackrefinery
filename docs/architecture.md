@@ -93,6 +93,13 @@ or regressing correction retains the exact coarse pose. The backend is
 stage-gated and cannot return success until canonical sizing, fixed-size pose
 refinement, and final acceptance are implemented.
 
+Before sizing, the anchored stage must pass a separate known-error recovery
+gate. That evaluator freezes selected components from a real model track,
+injects deterministic non-anchor XY/yaw drift, and keeps the frozen poses on
+the evaluator side only. This is an isolated test of Stage 3 registration, not
+an alternate runtime input contract, annotation target, or end-to-end crop
+test.
+
 Future experimental backends may use a different implementation without
 changing the public full-frame input or validated success/insufficient outcome.
 They must be named explicitly and must not weaken the public success semantics.

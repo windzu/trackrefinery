@@ -3,10 +3,24 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Sequence
 from pathlib import Path
 
 from trackrefinery.adapters import export_x4d_clip_inference
+from trackrefinery.component_consensus import (
+    COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION,
+    ComponentConsensusRefiner,
+    ComponentConsensusSettings,
+)
+from trackrefinery.controlled_recovery import (
+    DEFAULT_CONTROLLED_PERTURBATION_PROFILES,
+    run_controlled_recovery,
+)
+from trackrefinery.controlled_recovery_review import (
+    build_controlled_recovery_bundle,
+    build_controlled_recovery_suite,
+)
 from trackrefinery.dataset import InferenceDataset
 from trackrefinery.evaluation import (
     AcceptanceThresholds,
@@ -194,6 +208,77 @@ def build_clip_review_suite_main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def build_controlled_recovery_suite_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description="Build controlled Stage 3 recovery diagnostics."
+    )
+    parser.add_argument("--inference-root", required=True)
+    parser.add_argument("--case-id", action="append", required=True)
+    parser.add_argument(
+        "--profile", action="append", choices=("mild", "medium", "strong")
+    )
+    parser.add_argument("--data-source")
+    parser.add_argument("--settings", help="component-consensus settings JSON")
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--max-points-per-frame", type=int, default=8_000)
+    parser.add_argument("--title", default="TrackRefinery controlled pose recovery")
+    args = parser.parse_args(argv)
+    dataset = InferenceDataset.open(args.inference_root)
+    settings = _load_component_consensus_settings(args.settings)
+    profiles = {
+        profile.name: profile for profile in DEFAULT_CONTROLLED_PERTURBATION_PROFILES
+    }
+    selected_profiles = (
+        [profiles[name] for name in args.profile]
+        if args.profile
+        else list(DEFAULT_CONTROLLED_PERTURBATION_PROFILES)
+    )
+    output = Path(args.output).resolve()
+    bundles: list[Path] = []
+    for case_id in args.case_id:
+        case = dataset.load_case(case_id)
+        baseline = ComponentConsensusRefiner(settings).refine_with_trace(case)
+        for profile in selected_profiles:
+            run = run_controlled_recovery(
+                case,
+                profile=profile,
+                settings=settings,
+                component_trace=baseline.trace,
+            )
+            bundles.append(
+                build_controlled_recovery_bundle(
+                    run,
+                    output / "cases" / case.case_id / profile.name,
+                    data_source=args.data_source or dataset.dataset_id,
+                    max_points_per_frame=args.max_points_per_frame,
+                )
+            )
+    build_controlled_recovery_suite(output, bundles, title=args.title)
+    print(
+        f"wrote {len(bundles)} controlled recovery profiles for "
+        f"{len(args.case_id)} cases to {output}"
+    )
+    return 0
+
+
+def _load_component_consensus_settings(
+    path: str | None,
+) -> ComponentConsensusSettings:
+    if path is None:
+        return ComponentConsensusSettings()
+    value = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("component-consensus settings must contain an object")
+    schema = value.pop("schema_version", None)
+    if schema != COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION:
+        raise ValueError(
+            "component-consensus settings schema_version does not match this package"
+        )
+    return ComponentConsensusSettings(**value)
+
+
 def export_x4d_main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Export one X-4D Dataset 0.17 Clip into source-only inputs."
@@ -264,6 +349,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     clip_suite_parser.add_argument("--output", required=True)
     clip_suite_parser.add_argument("--clip-bundle", action="append", required=True)
     clip_suite_parser.add_argument("--title", default="TrackRefinery real Clip review")
+    recovery_parser = subparsers.add_parser("build-controlled-recovery-suite")
+    recovery_parser.add_argument("--inference-root", required=True)
+    recovery_parser.add_argument("--case-id", action="append", required=True)
+    recovery_parser.add_argument(
+        "--profile", action="append", choices=("mild", "medium", "strong")
+    )
+    recovery_parser.add_argument("--data-source")
+    recovery_parser.add_argument("--settings")
+    recovery_parser.add_argument("--output", required=True)
+    recovery_parser.add_argument("--max-points-per-frame", type=int, default=8_000)
+    recovery_parser.add_argument(
+        "--title", default="TrackRefinery controlled pose recovery"
+    )
     x4d_parser = subparsers.add_parser("export-x4d")
     x4d_parser.add_argument("--clip-dir", required=True)
     x4d_parser.add_argument("--annotation-document", required=True)
@@ -293,6 +391,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "build-review": build_review_main,
         "build-review-suite": build_review_suite_main,
         "build-clip-review-suite": build_clip_review_suite_main,
+        "build-controlled-recovery-suite": build_controlled_recovery_suite_main,
         "export-x4d": export_x4d_main,
         "review": review_main,
     }[args.command](forwarded)

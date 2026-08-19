@@ -105,6 +105,35 @@ for frame in run.trace.frames:
     )
 ```
 
+Stage 3 correction capability can be tested without pretending that an
+already-good natural track contains a large error. The controlled-recovery
+utility freezes component selection, keeps the anchor unchanged, injects a
+known smooth pose drift into other geometry frames, and reports how much of
+that drift the aggregation stage removes:
+
+```python
+from trackrefinery import (
+    DEFAULT_CONTROLLED_PERTURBATION_PROFILES,
+    build_controlled_recovery_bundle,
+    run_controlled_recovery,
+)
+
+recovery = run_controlled_recovery(
+    case,
+    profile=DEFAULT_CONTROLLED_PERTURBATION_PROFILES[-1],  # 15 cm / 2 degrees
+    component_trace=run.trace,
+)
+build_controlled_recovery_bundle(
+    recovery,
+    "review/recovery/strong",
+    data_source="frozen detector track",
+)
+```
+
+Its REFERENCE view is only the frozen model-track proxy used by the evaluator;
+it is not reviewed gold, and its poses are not available to the perturbed
+algorithm run.
+
 Multiple case bundles can be placed under one directory and exposed through a
 single tabbed review page with `build_review_suite()`. Real-data catalogs use
 `build_clip_review_suite()` so each outer tab is one Clip and all of its
@@ -112,6 +141,11 @@ instances are tiled inside the tab. When a physically
 separate gold target is supplied, each case also contains an annotation-pose-
 aligned aggregate for review-only comparison; it is never exposed to the
 refinement backend.
+
+`trackrefinery-build-controlled-recovery-suite` generates the default mild,
+medium, and strong profiles for one or more dense cases and writes a separate
+case-tabbed diagnostic suite. These controlled cases are not inserted into the
+real Clip inventory as if they were source Clips.
 
 The base package depends only on NumPy. Registration uses SciPy through the
 `geometric` extra, review rendering uses the `review` extra, and the Dataset
