@@ -6,6 +6,7 @@ from trackrefinery.component_consensus import (
     COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION,
     ComponentConsensusRefiner,
     ComponentConsensusSettings,
+    aggregate_geometry_components,
     select_object_components,
 )
 from trackrefinery.contracts import (
@@ -33,6 +34,8 @@ from trackrefinery.geometric import (
     EVIDENCE_TRACE_CONTRACT,
     GEOMETRIC_ALGORITHM_VERSION,
     GEOMETRIC_CONFIG_SCHEMA_VERSION,
+    AggregateSharpnessTrace,
+    AnchoredAggregationTrace,
     CanonicalShapeTrace,
     CuboidFitTrace,
     EnvelopeFittingSettings,
@@ -71,6 +74,8 @@ __all__ = [
     "GEOMETRIC_ALGORITHM_VERSION",
     "GEOMETRIC_CONFIG_SCHEMA_VERSION",
     "AcceptanceThresholds",
+    "AggregateSharpnessTrace",
+    "AnchoredAggregationTrace",
     "BenchmarkReport",
     "Box3D",
     "CanonicalShapeTrace",
@@ -107,6 +112,7 @@ __all__ = [
     "TrackObservation",
     "TrackRefiner",
     "X4DInferenceExport",
+    "aggregate_geometry_components",
     "build_clip_review_suite",
     "build_review_bundle",
     "build_review_suite",

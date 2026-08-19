@@ -85,11 +85,13 @@ not use sensor-origin rays, free-space, occupancy, learned priors, or
 per-sensor processing. Optional portable metadata remains in the contract for
 other backends and diagnostics but is not consumed by V2.
 
-The V2 implementation currently stops after per-frame component selection and
-provisional frame-role classification. Overwide components that likely merge a
-neighbor or clutter remain ambiguous rather than becoming object evidence. The
-backend is stage-gated and cannot return success until anchored aggregation,
-canonical sizing, fixed-size pose refinement, and acceptance are implemented.
+The V2 implementation currently stops after anchored aggregation of reliable
+geometry-frame components. Overwide components that likely merge a neighbor or
+clutter remain ambiguous rather than becoming object evidence. Candidate
+alignment is bounded, sequential, and individually rejectable; an unnecessary
+or regressing correction retains the exact coarse pose. The backend is
+stage-gated and cannot return success until canonical sizing, fixed-size pose
+refinement, and final acceptance are implemented.
 
 Future experimental backends may use a different implementation without
 changing the public full-frame input or validated success/insufficient outcome.

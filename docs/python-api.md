@@ -35,7 +35,7 @@ point-evidence selection, ground estimation, all-frame upright registration,
 canonical shape aggregation, evidence reassignment, and visible-envelope
 fitting. It is retained to reproduce the real-data regression and intentionally
 returns `algorithm_stage_incomplete` rather than publishing provisional
-geometry. The accepted V2 component-consensus backend is not implemented yet:
+geometry. It is not the accepted V2 implementation:
 
 ```python
 from trackrefinery import JointCuboidRefiner, write_geometric_trace
@@ -75,30 +75,32 @@ are versioned algorithm configuration, not a caller-owned crop request.
 Install `trackrefinery[geometric]` before invoking this backend; importing the
 base package and using its contracts remains NumPy-only.
 
-## Inspect the V2 component stage
+## Inspect V2 component selection and anchored aggregation
 
 The accepted backend currently stops after selecting one object component per
-frame and assigning provisional frame roles. A green `target` state in the
+frame, assigning provisional frame roles, and sequentially aggregating reliable
+geometry frames. A green `target` state in the
 portable evidence enum means `selected object component` for this V2 stage;
-orange means a competing or inseparable component. It does not perform
-registration or estimate dimensions yet:
+orange means a competing or inseparable component. Stage 3 produces provisional
+alignment traces but does not estimate dimensions or publish a refinement:
 
 ```python
 from trackrefinery import ComponentConsensusRefiner, write_geometric_trace
 
 run = ComponentConsensusRefiner().refine_with_trace(case)
 assert run.outcome.status == "insufficient_evidence"
-assert run.trace.stage == "component_selection_v2"
+assert run.trace.stage == "anchored_component_aggregation_v2"
+print(run.trace.anchored_aggregation.to_dict())
 for frame in run.trace.frames:
     decision = frame.component
-    print(frame.frame_id, decision.status, decision.frame_role)
+    print(frame.frame_id, decision.status, decision.frame_role, frame.registration)
 write_geometric_trace("traces/v2-component-case", run.trace)
 ```
 
 The review bundle renders explicit `selected object component`, `competing /
-inseparable component`, `other ROI points`, and `removed ground` labels. Its
-aggregate remains input-track aligned and is marked `no registration
-performed`.
+inseparable component`, `other ROI points`, and `removed ground` labels. Dense
+supported tracks also receive a same-selected-point BEFORE/AFTER view of the
+input-track alignment and provisional anchored alignment.
 
 ## Load source-only input
 

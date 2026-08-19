@@ -84,6 +84,23 @@ improve while the visible aggregate becomes wider and less vehicle-like. V2
 must reproduce this same-point case as a non-regression test and must reject a
 candidate with this behavior.
 
+### V2 Stage 3 dense review slice
+
+The first anchored-aggregation review slice contains the five dense-supported
+model tracks in `20260817_G150-002_000`. They contribute 17, 17, 11, 6, and 5
+geometry frames respectively. All geometry frames retained authority; proposed
+movements that were unnecessary or failed a local improvement check kept their
+exact coarse pose.
+
+Across this slice, accepted non-zero corrections stayed below 0.069 m and 1.36
+degrees. Trimmed cross-frame RMSE decreased for every track. Voxel concentration
+increased materially for three tracks and changed by less than 0.0004 for the
+other two, within the explicit non-regression allowance. Fixed same-point top
+and side A/B review shows small sharpening rather than the V1 envelope
+expansion. This remains qualitative development evidence because the Clip has
+no physically separate reviewed targets; it does not qualify pose accuracy or
+canonical dimensions.
+
 ## Gold-target preparation
 
 Existing annotation is a candidate target, not automatically gold. Selected

@@ -7,9 +7,9 @@ import json
 from dataclasses import asdict, dataclass
 from math import isfinite
 
-COMPONENT_CONSENSUS_ALGORITHM_VERSION = "component-consensus-refiner-v2"
+COMPONENT_CONSENSUS_ALGORITHM_VERSION = "component-consensus-refiner-v2.1.0"
 COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION = (
-    "trackrefinery-component-consensus-settings-v2"
+    "trackrefinery-component-consensus-settings-v3"
 )
 
 
@@ -38,7 +38,7 @@ def _triplet(
 
 @dataclass(frozen=True, slots=True)
 class ComponentConsensusSettings:
-    """Internal V2 ROI, component, and provisional frame-role policy."""
+    """Internal V2 component, frame-role, and anchored-aggregation policy."""
 
     roi_margin_xyz_m: tuple[float, float, float] = (1.0, 1.0, 0.55)
     seed_allowance_xyz_m: tuple[float, float, float] = (0.08, 0.08, 0.08)
@@ -83,6 +83,35 @@ class ComponentConsensusSettings:
     pose_minimum_vertical_spread_m: float = 0.2
     pose_minimum_dominance: float = 0.45
     pose_minimum_stability_iou: float = 0.35
+    # Stage 3 only consumes geometry frames. These values constrain a local
+    # alignment primitive; the dense frame-role thresholds above are not part
+    # of its objective.
+    aggregation_voxel_size_m: float = 0.08
+    aggregation_anchor_minimum_relative_quality: float = 0.8
+    aggregation_maximum_iterations: int = 10
+    aggregation_maximum_correspondence_distance_m: float = 0.28
+    aggregation_correspondence_trim_fraction: float = 0.7
+    aggregation_minimum_correspondences: int = 80
+    aggregation_minimum_overlap_fraction: float = 0.12
+    aggregation_huber_delta_m: float = 0.06
+    aggregation_step_gain: float = 0.65
+    aggregation_maximum_xy_step_m: float = 0.04
+    aggregation_maximum_yaw_step_deg: float = 0.75
+    aggregation_maximum_xy_correction_m: float = 0.25
+    aggregation_maximum_yaw_correction_deg: float = 4.0
+    aggregation_convergence_translation_m: float = 0.002
+    aggregation_convergence_yaw_deg: float = 0.03
+    aggregation_noop_translation_m: float = 0.006
+    aggregation_noop_yaw_deg: float = 0.08
+    aggregation_minimum_rmse_improvement_m: float = 0.001
+    aggregation_minimum_relative_rmse_improvement: float = 0.01
+    aggregation_sharpness_quantile: float = 0.01
+    aggregation_sharpness_voxel_size_m: float = 0.1
+    aggregation_maximum_axis_spread_regression_m: float = 0.02
+    aggregation_maximum_concentration_regression: float = 0.005
+    aggregation_maximum_correction_velocity_mps: float = 3.0
+    aggregation_maximum_correction_acceleration_mps2: float = 50.0
+    aggregation_maximum_correction_yaw_rate_degps: float = 30.0
 
     def __post_init__(self) -> None:
         roi = _triplet(self.roi_margin_xyz_m, "roi_margin_xyz_m")
@@ -127,6 +156,23 @@ class ComponentConsensusSettings:
             "stability_voxel_scale",
             "pose_minimum_horizontal_spread_m",
             "pose_minimum_vertical_spread_m",
+            "aggregation_voxel_size_m",
+            "aggregation_maximum_correspondence_distance_m",
+            "aggregation_huber_delta_m",
+            "aggregation_maximum_xy_step_m",
+            "aggregation_maximum_yaw_step_deg",
+            "aggregation_maximum_xy_correction_m",
+            "aggregation_maximum_yaw_correction_deg",
+            "aggregation_convergence_translation_m",
+            "aggregation_convergence_yaw_deg",
+            "aggregation_noop_translation_m",
+            "aggregation_noop_yaw_deg",
+            "aggregation_minimum_rmse_improvement_m",
+            "aggregation_sharpness_voxel_size_m",
+            "aggregation_maximum_axis_spread_regression_m",
+            "aggregation_maximum_correction_velocity_mps",
+            "aggregation_maximum_correction_acceleration_mps2",
+            "aggregation_maximum_correction_yaw_rate_degps",
         ):
             object.__setattr__(self, name, _positive(getattr(self, name), name))
         if not 0 < self.ground_max_tilt_deg < 90:
@@ -142,6 +188,12 @@ class ComponentConsensusSettings:
             "maximum_outside_envelope_fraction",
             "pose_minimum_dominance",
             "pose_minimum_stability_iou",
+            "aggregation_anchor_minimum_relative_quality",
+            "aggregation_correspondence_trim_fraction",
+            "aggregation_minimum_overlap_fraction",
+            "aggregation_step_gain",
+            "aggregation_minimum_relative_rmse_improvement",
+            "aggregation_maximum_concentration_regression",
         ):
             object.__setattr__(self, name, _fraction(getattr(self, name), name))
         reference_quantile = _fraction(
@@ -154,6 +206,10 @@ class ComponentConsensusSettings:
         if not isfinite(quantile) or not 0 < quantile < 0.5:
             raise ValueError("spread_quantile must be in (0, 0.5)")
         object.__setattr__(self, "spread_quantile", quantile)
+        sharpness_quantile = float(self.aggregation_sharpness_quantile)
+        if not isfinite(sharpness_quantile) or not 0 < sharpness_quantile < 0.5:
+            raise ValueError("aggregation_sharpness_quantile must be in (0, 0.5)")
+        object.__setattr__(self, "aggregation_sharpness_quantile", sharpness_quantile)
         for name, minimum in (
             ("ground_min_candidates", 3),
             ("ground_min_inliers", 3),
@@ -165,6 +221,8 @@ class ComponentConsensusSettings:
             ("track_minimum_geometry_frames", 1),
             ("pose_minimum_points", 1),
             ("pose_minimum_voxels", 1),
+            ("aggregation_maximum_iterations", 1),
+            ("aggregation_minimum_correspondences", 4),
         ):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < minimum:

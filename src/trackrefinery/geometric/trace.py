@@ -295,12 +295,18 @@ class FrameRegistrationTrace:
     yaw_correction_deg: float | None
 
     def __post_init__(self) -> None:
-        if self.status not in {"registered", "insufficient_evidence"}:
+        if self.status not in {
+            "registered",
+            "retained_coarse",
+            "insufficient_evidence",
+        }:
             raise ValueError("registration status is unsupported")
         reasons = tuple(self.reason_codes)
-        if self.status == "registered":
-            if reasons:
+        if self.status in {"registered", "retained_coarse"}:
+            if self.status == "registered" and reasons:
                 raise ValueError("registered frames cannot contain reason codes")
+            if self.status == "retained_coarse" and not reasons:
+                raise ValueError("retained-coarse frames require a reason code")
             if (
                 self.canonical_from_coarse is None
                 or self.candidate_pose_annotation is None
@@ -319,7 +325,7 @@ class FrameRegistrationTrace:
                     )
                 )
             ):
-                raise ValueError("registered frames require complete metrics")
+                raise ValueError("accepted frames require complete metrics")
         else:
             if not reasons or any(not value for value in reasons):
                 raise ValueError("insufficient registration requires reason codes")
@@ -393,6 +399,209 @@ class FrameRegistrationTrace:
             yaw_correction_deg=_optional_number(
                 value.get("yaw_correction_deg"),
                 "registration.yaw_correction_deg",
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AggregateSharpnessTrace:
+    """Same-point aggregate measurements used only for regression protection."""
+
+    robust_spread_xyz_m: tuple[float, float, float]
+    xy_area_m2: float
+    voxel_concentration: float
+    cross_frame_rmse_m: float
+    point_count: int
+
+    def __post_init__(self) -> None:
+        spread = tuple(float(value) for value in self.robust_spread_xyz_m)
+        numeric = (
+            *spread,
+            float(self.xy_area_m2),
+            float(self.voxel_concentration),
+            float(self.cross_frame_rmse_m),
+        )
+        if len(spread) != 3 or not np.isfinite(numeric).all():
+            raise ValueError("aggregate sharpness metrics must be finite")
+        if any(value < 0 for value in spread):
+            raise ValueError("aggregate spread must be non-negative")
+        if self.xy_area_m2 < 0 or self.cross_frame_rmse_m < 0:
+            raise ValueError("aggregate area and RMSE must be non-negative")
+        if not 0 <= self.voxel_concentration <= 1:
+            raise ValueError("voxel_concentration must be in [0, 1]")
+        if not isinstance(self.point_count, int) or self.point_count < 1:
+            raise ValueError("aggregate point_count must be a positive integer")
+        object.__setattr__(self, "robust_spread_xyz_m", spread)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "robust_spread_xyz_m": list(self.robust_spread_xyz_m),
+            "xy_area_m2": self.xy_area_m2,
+            "voxel_concentration": self.voxel_concentration,
+            "cross_frame_rmse_m": self.cross_frame_rmse_m,
+            "point_count": self.point_count,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> AggregateSharpnessTrace:
+        if not isinstance(value, dict):
+            raise ValueError("aggregate sharpness must be an object")
+        return cls(
+            robust_spread_xyz_m=_float_triplet(
+                value.get("robust_spread_xyz_m"), "robust_spread_xyz_m"
+            ),
+            xy_area_m2=_number(value.get("xy_area_m2"), "xy_area_m2"),
+            voxel_concentration=_number(
+                value.get("voxel_concentration"), "voxel_concentration"
+            ),
+            cross_frame_rmse_m=_number(
+                value.get("cross_frame_rmse_m"), "cross_frame_rmse_m"
+            ),
+            point_count=_integer(value.get("point_count"), "point_count"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AnchoredAggregationTrace:
+    """Track-level Stage 3 decision, including deterministic aggregation order."""
+
+    status: str
+    reason_codes: tuple[str, ...]
+    anchor_frame_id: str | None
+    attempted_frame_ids: tuple[str, ...]
+    accepted_frame_ids: tuple[str, ...]
+    rejected_frame_ids: tuple[str, ...]
+    baseline_sharpness: AggregateSharpnessTrace | None
+    candidate_sharpness: AggregateSharpnessTrace | None
+    maximum_correction_velocity_mps: float | None
+    maximum_correction_acceleration_mps2: float | None
+    maximum_correction_yaw_rate_degps: float | None
+
+    def __post_init__(self) -> None:
+        if self.status not in {"candidate", "insufficient_evidence"}:
+            raise ValueError("anchored aggregation status is unsupported")
+        reasons = tuple(self.reason_codes)
+        attempted = tuple(self.attempted_frame_ids)
+        accepted = tuple(self.accepted_frame_ids)
+        rejected = tuple(self.rejected_frame_ids)
+        if any(not isinstance(reason, str) or not reason for reason in reasons):
+            raise ValueError("aggregation reason codes must be non-empty strings")
+        for name, values in (
+            ("attempted_frame_ids", attempted),
+            ("accepted_frame_ids", accepted),
+            ("rejected_frame_ids", rejected),
+        ):
+            if len(values) != len(set(values)) or any(not value for value in values):
+                raise ValueError(f"{name} must contain unique non-empty IDs")
+        if set(accepted) & set(rejected):
+            raise ValueError("accepted and rejected frame IDs must be disjoint")
+        if set(attempted) != set(accepted) | set(rejected):
+            raise ValueError("attempted frames must partition into accepted/rejected")
+        if self.status == "candidate":
+            if (
+                reasons
+                or self.anchor_frame_id is None
+                or not accepted
+                or accepted[0] != self.anchor_frame_id
+                or self.baseline_sharpness is None
+                or self.candidate_sharpness is None
+            ):
+                raise ValueError("aggregation candidate requires complete diagnostics")
+        elif not reasons:
+            raise ValueError("insufficient aggregation requires reason codes")
+        metrics = (
+            self.maximum_correction_velocity_mps,
+            self.maximum_correction_acceleration_mps2,
+            self.maximum_correction_yaw_rate_degps,
+        )
+        if any(
+            value is not None and (not np.isfinite(value) or value < 0)
+            for value in metrics
+        ):
+            raise ValueError("aggregation trajectory metrics must be non-negative")
+        object.__setattr__(self, "reason_codes", reasons)
+        object.__setattr__(self, "attempted_frame_ids", attempted)
+        object.__setattr__(self, "accepted_frame_ids", accepted)
+        object.__setattr__(self, "rejected_frame_ids", rejected)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "reason_codes": list(self.reason_codes),
+            "anchor_frame_id": self.anchor_frame_id,
+            "attempted_frame_ids": list(self.attempted_frame_ids),
+            "accepted_frame_ids": list(self.accepted_frame_ids),
+            "rejected_frame_ids": list(self.rejected_frame_ids),
+            "baseline_sharpness": (
+                None
+                if self.baseline_sharpness is None
+                else self.baseline_sharpness.to_dict()
+            ),
+            "candidate_sharpness": (
+                None
+                if self.candidate_sharpness is None
+                else self.candidate_sharpness.to_dict()
+            ),
+            "maximum_correction_velocity_mps": (self.maximum_correction_velocity_mps),
+            "maximum_correction_acceleration_mps2": (
+                self.maximum_correction_acceleration_mps2
+            ),
+            "maximum_correction_yaw_rate_degps": (
+                self.maximum_correction_yaw_rate_degps
+            ),
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> AnchoredAggregationTrace:
+        if not isinstance(value, dict):
+            raise ValueError("anchored aggregation must be an object")
+        reasons = value.get("reason_codes")
+        attempted = value.get("attempted_frame_ids")
+        accepted = value.get("accepted_frame_ids")
+        rejected = value.get("rejected_frame_ids")
+        if not all(
+            isinstance(item, list) for item in (reasons, attempted, accepted, rejected)
+        ):
+            raise ValueError("aggregation reasons and frame IDs must be lists")
+        if any(
+            not isinstance(item, str)
+            for values in (reasons, attempted, accepted, rejected)
+            for item in values
+        ):
+            raise ValueError("aggregation reasons and frame IDs must be strings")
+        baseline = value.get("baseline_sharpness")
+        candidate = value.get("candidate_sharpness")
+        anchor = value.get("anchor_frame_id")
+        if anchor is not None and not isinstance(anchor, str):
+            raise ValueError("anchor_frame_id must be a string or null")
+        return cls(
+            status=_string(value.get("status"), "aggregation.status"),
+            reason_codes=tuple(reasons),
+            anchor_frame_id=anchor,
+            attempted_frame_ids=tuple(attempted),
+            accepted_frame_ids=tuple(accepted),
+            rejected_frame_ids=tuple(rejected),
+            baseline_sharpness=(
+                None
+                if baseline is None
+                else AggregateSharpnessTrace.from_dict(baseline)
+            ),
+            candidate_sharpness=(
+                None
+                if candidate is None
+                else AggregateSharpnessTrace.from_dict(candidate)
+            ),
+            maximum_correction_velocity_mps=_optional_number(
+                value.get("maximum_correction_velocity_mps"),
+                "maximum_correction_velocity_mps",
+            ),
+            maximum_correction_acceleration_mps2=_optional_number(
+                value.get("maximum_correction_acceleration_mps2"),
+                "maximum_correction_acceleration_mps2",
+            ),
+            maximum_correction_yaw_rate_degps=_optional_number(
+                value.get("maximum_correction_yaw_rate_degps"),
+                "maximum_correction_yaw_rate_degps",
             ),
         )
 
@@ -644,6 +853,7 @@ class GeometricRefinementTrace:
     settings_json: str
     stage: str
     frames: tuple[FrameEvidenceTrace, ...]
+    anchored_aggregation: AnchoredAggregationTrace | None = None
     canonical_shape: CanonicalShapeTrace | None = None
     cuboid_fit: CuboidFitTrace | None = None
 
@@ -680,6 +890,10 @@ class GeometricRefinementTrace:
         frame_ids = [frame.frame_id for frame in frames]
         if not frames or len(frame_ids) != len(set(frame_ids)):
             raise ValueError("trace frames must be non-empty and unique")
+        if self.anchored_aggregation is not None:
+            aggregation_ids = set(self.anchored_aggregation.attempted_frame_ids)
+            if aggregation_ids - set(frame_ids):
+                raise ValueError("anchored aggregation references unknown frames")
         if self.canonical_shape is not None:
             unknown = set(self.canonical_shape.registered_frame_ids) - set(frame_ids)
             if unknown:
@@ -718,6 +932,11 @@ class GeometricRefinementTrace:
             "stage": self.stage,
             "total_point_state_counts": self.total_counts,
             "frames": [frame.to_summary_dict() for frame in self.frames],
+            "anchored_aggregation": (
+                None
+                if self.anchored_aggregation is None
+                else self.anchored_aggregation.to_dict()
+            ),
             "canonical_shape": (
                 None
                 if self.canonical_shape is None
@@ -778,7 +997,7 @@ def validate_geometric_trace(
             frame.frame_id
             for frame in trace.frames
             if frame.registration is not None
-            and frame.registration.status == "registered"
+            and frame.registration.status in {"registered", "retained_coarse"}
         )
         if trace.canonical_shape.registered_frame_ids != registered:
             raise ValueError(
@@ -925,6 +1144,12 @@ def read_geometric_trace(path: str | Path) -> GeometricRefinementTrace:
     settings_json = json.dumps(
         settings, sort_keys=True, separators=(",", ":"), allow_nan=False
     )
+    aggregation_row = payload.get("anchored_aggregation")
+    anchored_aggregation = (
+        None
+        if aggregation_row is None
+        else AnchoredAggregationTrace.from_dict(aggregation_row)
+    )
     cuboid_row = payload.get("cuboid_fit")
     cuboid_fit = None if cuboid_row is None else CuboidFitTrace.from_dict(cuboid_row)
     return GeometricRefinementTrace(
@@ -940,6 +1165,7 @@ def read_geometric_trace(path: str | Path) -> GeometricRefinementTrace:
         settings_json=settings_json,
         stage=_string(payload.get("stage"), "stage"),
         frames=tuple(frames),
+        anchored_aggregation=anchored_aggregation,
         canonical_shape=canonical_shape,
         cuboid_fit=cuboid_fit,
     )

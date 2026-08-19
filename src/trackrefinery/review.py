@@ -26,6 +26,7 @@ from trackrefinery.geometric.trace import (
     CanonicalShapeTrace,
     CuboidFitTrace,
     EvidenceState,
+    FrameRole,
     GeometricRefinementTrace,
     validate_geometric_trace,
     write_geometric_trace,
@@ -97,7 +98,10 @@ REVIEW_MODE_PRESENTATION = {
 def _evidence_presentation(
     trace: GeometricRefinementTrace | None,
 ) -> tuple[str, Mapping[EvidenceState, str]]:
-    if trace is not None and trace.stage == "component_selection_v2":
+    if trace is not None and trace.stage in {
+        "component_selection_v2",
+        "anchored_component_aggregation_v2",
+    }:
         return "V2 component selection", COMPONENT_EVIDENCE_LABELS
     return "Current evidence classification", LEGACY_EVIDENCE_LABELS
 
@@ -118,7 +122,10 @@ def _dense_scope_summary(
     outcome: RefinementOutcome,
     trace: GeometricRefinementTrace | None,
 ) -> tuple[bool | None, int | None]:
-    if trace is None or trace.stage != "component_selection_v2":
+    if trace is None or trace.stage not in {
+        "component_selection_v2",
+        "anchored_component_aggregation_v2",
+    }:
         return None, None
     diagnostics = getattr(outcome, "diagnostics", None)
     supported = (
@@ -309,6 +316,11 @@ def build_review_bundle(
                 "cuboid_candidate_box": cuboid_candidate_box,
                 "gold_box": gold_box,
                 "point_states": point_states,
+                "frame_role": (
+                    None
+                    if frame_trace is None or frame_trace.component is None
+                    else frame_trace.component.frame_role.value
+                ),
             }
         )
 
@@ -413,6 +425,11 @@ def build_review_bundle(
         "dense_track_supported": dense_track_supported,
         "selected_component_point_count": selected_component_point_count,
         "has_registration_trace": canonical_shape is not None,
+        "anchored_aggregation": (
+            None
+            if trace is None or trace.anchored_aggregation is None
+            else trace.anchored_aggregation.to_dict()
+        ),
         "has_input_track_comparison": has_input_track_comparison,
         "has_cuboid_candidate": (
             cuboid_fit is not None and cuboid_fit.status == "candidate"
@@ -475,6 +492,7 @@ def build_review_bundle(
             cuboid_fit,
             evidence_title,
             evidence_labels,
+            None if trace is None else trace.stage,
         )
         _write_html(
             output / "preview.html",
@@ -597,6 +615,8 @@ def _review_bundle_index_row(
     evidence_side = bundle / "thumbnails" / "aggregate_evidence_side.png"
     if algorithm_stage == "component_selection_v2":
         alignment_label = "V2 component selection · input-track alignment"
+    elif algorithm_stage == "anchored_component_aggregation_v2":
+        alignment_label = "V2 anchored component aggregation"
     elif review_mode == "algorithm_candidate":
         alignment_label = "Algorithm registration"
     elif review_mode == "source_annotation_reference":
@@ -1341,6 +1361,7 @@ def _write_alignment_comparison_thumbnails(
     preview_frames: list[dict[str, object]],
     outcome: RefinementOutcome,
     cuboid_fit: CuboidFitTrace | None,
+    evidence_state: NDArray[np.uint8] | None,
 ) -> None:
     """Render fair before/after views from identical selected point indices."""
 
@@ -1348,6 +1369,12 @@ def _write_alignment_comparison_thumbnails(
 
     if len(input_track_aggregate) != len(algorithm_aggregate):
         raise ValueError("alignment comparison aggregates must contain the same points")
+    mask = _alignment_comparison_mask(frame_index, evidence_state, preview_frames)
+    input_track_aggregate = input_track_aggregate[mask]
+    algorithm_aggregate = algorithm_aggregate[mask]
+    frame_index = frame_index[mask]
+    if not len(input_track_aggregate):
+        return
     input_size = tuple(
         np.median(
             [
@@ -1435,6 +1462,26 @@ def _write_alignment_comparison_thumbnails(
         plt.close(figure)
 
 
+def _alignment_comparison_mask(
+    frame_index: NDArray[np.int16],
+    evidence_state: NDArray[np.uint8] | None,
+    preview_frames: list[dict[str, object]],
+) -> NDArray[np.bool_]:
+    """Restrict Stage 3 A/B to identical selected geometry-component points."""
+
+    mask = np.ones(len(frame_index), dtype=bool)
+    if evidence_state is not None:
+        mask &= evidence_state == EvidenceState.TARGET.value
+    geometry_indices = [
+        index
+        for index, item in enumerate(preview_frames)
+        if item.get("frame_role") == FrameRole.GEOMETRY.value
+    ]
+    if geometry_indices:
+        mask &= np.isin(frame_index, np.asarray(geometry_indices, dtype=np.int16))
+    return mask
+
+
 def _write_thumbnails(
     output: Path,
     aggregate: NDArray[np.float32],
@@ -1451,6 +1498,7 @@ def _write_thumbnails(
     cuboid_fit: CuboidFitTrace | None,
     evidence_title: str,
     evidence_labels: Mapping[EvidenceState, str],
+    algorithm_stage: str | None,
 ) -> None:
     try:
         import matplotlib
@@ -1471,6 +1519,7 @@ def _write_thumbnails(
             preview_frames,
             outcome,
             cuboid_fit,
+            evidence_state,
         )
 
     for name, axes in {
@@ -1599,7 +1648,11 @@ def _write_thumbnails(
             alpha=0.75,
         )
         figure.colorbar(scatter, ax=axis, label="supporting frames")
-        axis.set_title("Canonical shape after alternating registration")
+        axis.set_title(
+            "Persistent shape after anchored aggregation"
+            if algorithm_stage == "anchored_component_aggregation_v2"
+            else "Canonical shape after alternating registration"
+        )
         axis.set_xlabel("canonical X (m)")
         axis.set_ylabel("canonical Y (m)")
         axis.set_aspect("equal", adjustable="box")
@@ -1778,12 +1831,23 @@ def _write_html(
         ) from error
 
     evidence_title, evidence_labels = _evidence_presentation(trace)
-    is_component_stage = trace is not None and trace.stage == "component_selection_v2"
+    is_component_stage = trace is not None and trace.stage in {
+        "component_selection_v2",
+        "anchored_component_aggregation_v2",
+    }
+    is_anchored_stage = (
+        trace is not None and trace.stage == "anchored_component_aggregation_v2"
+    )
+    alignment_mask = _alignment_comparison_mask(
+        aggregate_frame_index, aggregate_evidence_state, preview_frames
+    )
     input_track_figure = None
     if input_track_aggregate is not None:
         input_track_figure = go.Figure()
         for index, frame in enumerate(case.frames):
-            points = input_track_aggregate[aggregate_frame_index == index]
+            points = input_track_aggregate[
+                (aggregate_frame_index == index) & alignment_mask
+            ]
             input_track_figure.add_trace(
                 go.Scatter3d(
                     x=points[:, 0],
@@ -1814,7 +1878,10 @@ def _write_html(
 
     aggregate_figure = go.Figure()
     for index, frame in enumerate(case.frames):
-        points = aggregate[aggregate_frame_index == index]
+        frame_mask = aggregate_frame_index == index
+        if input_track_aggregate is not None:
+            frame_mask &= alignment_mask
+        points = aggregate[frame_mask]
         aggregate_figure.add_trace(
             go.Scatter3d(
                 x=points[:, 0],
@@ -1869,7 +1936,9 @@ def _write_html(
             "#00b8d4",
         )
     aggregate_title = (
-        "Input-track-aligned V2 component preview (no registration performed)"
+        "AFTER · anchored V2 component aggregate (provisional)"
+        if is_anchored_stage
+        else "Input-track-aligned V2 component preview (no registration performed)"
         if is_component_stage
         else (
             "Source-annotation-aligned aggregate (reference only; not gold)"
@@ -1955,7 +2024,11 @@ def _write_html(
             ]
         )
         canonical_figure.update_layout(
-            title="Canonical shape after alternating registration",
+            title=(
+                "Persistent shape after anchored aggregation"
+                if is_anchored_stage
+                else "Canonical shape after alternating registration"
+            ),
             scene={"aspectmode": "data"},
             margin={"l": 0, "r": 0, "t": 45, "b": 0},
         )
@@ -2131,7 +2204,9 @@ def _write_html(
         else [
             (
                 "algorithm",
-                "Input-track aggregate"
+                "Anchored component aggregate"
+                if is_anchored_stage
+                else "Input-track aggregate"
                 if is_component_stage
                 else "Algorithm aggregate",
                 aggregate_html,

@@ -14,6 +14,8 @@ from trackrefinery.geometric.settings import (
 )
 from trackrefinery.geometric.trace import (
     EVIDENCE_TRACE_CONTRACT,
+    AggregateSharpnessTrace,
+    AnchoredAggregationTrace,
     CanonicalShapeTrace,
     CuboidFitTrace,
     EvidenceState,
@@ -33,6 +35,8 @@ __all__ = [
     "EVIDENCE_TRACE_CONTRACT",
     "GEOMETRIC_ALGORITHM_VERSION",
     "GEOMETRIC_CONFIG_SCHEMA_VERSION",
+    "AggregateSharpnessTrace",
+    "AnchoredAggregationTrace",
     "CanonicalShapeTrace",
     "CuboidFitTrace",
     "EnvelopeFittingSettings",
