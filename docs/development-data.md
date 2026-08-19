@@ -101,6 +101,33 @@ expansion. This remains qualitative development evidence because the Clip has
 no physically separate reviewed targets; it does not qualify pose accuracy or
 canonical dimensions.
 
+The visible gain is small because these five frozen model tracks are already
+closely aligned. They establish that Stage 3 preserves good dense inputs, not
+that it can repair materially biased poses. The next gate is the controlled
+pose-recovery suite defined in `evaluation-and-review.md`: reuse the exact
+selected real components, inject deterministic 5/10/15 cm and 0.5/1/2 degree
+non-anchor drift, and show reference/input/output shared-axis aggregates. The
+original model-track poses are an evaluator-side proxy reference, never a gold
+target or Stage 3 input. Component indices are deliberately frozen before
+perturbation because this benchmark isolates registration from crop selection.
+
+### First controlled-recovery result
+
+The first complete suite applies all three profiles to the same five dense
+tracks. Translation RMS improves in 13 of 15 case/profile runs, while yaw RMS
+improves in only 9 of 15. Under the strongest 15 cm / 2 degree profile, the
+per-track translation RMS reduction is 20.2%, 6.7%, 32.6%, 44.4%, and 33.7%.
+Yaw RMS reduction is -13.4%, 37.4%, 85.8%, 7.4%, and 37.3% respectively. The
+negative result is a real regression, not hidden by an average.
+
+This establishes limited local correction capability but fails the Stage 3
+gate: one track regresses in strong-profile yaw, small perturbations can be
+dominated by the model track's own residual bias, and most injected error
+remains after aggregation. The reference/input/output views make the successful
+and failed cases visible with identical points and axes. Stage 4 sizing must
+remain blocked while Stage 3 registration is redesigned and rerun against this
+frozen suite.
+
 ## Gold-target preparation
 
 Existing annotation is a candidate target, not automatically gold. Selected

@@ -1,8 +1,8 @@
 # Evaluation and Review Design
 
-Status: framework, legacy V1 previews, and V2 component/frame-role plus anchored
-alignment previews implemented; canonical-size and fixed-size pose diagnostics
-remain to be implemented
+Status: framework, legacy V1 previews, V2 component/frame-role plus anchored
+alignment previews, and controlled Stage 3 recovery diagnostics implemented;
+canonical-size and fixed-size pose diagnostics remain to be implemented
 
 ## What “good” means
 
@@ -74,6 +74,48 @@ Report:
 The primary product metric is strict successful-track precision. Coverage is
 secondary: returning insufficient evidence is preferable to returning geometry
 that a reviewer must correct.
+
+## Controlled pose-recovery validation
+
+Natural model tracks that already align well are useful non-regression cases,
+but they cannot demonstrate how much pose error the aggregation stage can
+actually recover. Before canonical-size fitting begins, Stage 3 therefore has
+an explicit controlled-recovery benchmark over real selected components.
+
+The benchmark is a development diagnostic, not ground-truth evaluation:
+
+1. run component selection on the frozen real model track;
+2. keep the selected point indices, frame roles, and chosen anchor fixed;
+3. leave the anchor unchanged and inject deterministic, smooth local XY/yaw
+   drift into the other geometry-frame coarse poses;
+4. run anchored aggregation without exposing the original poses to it;
+5. compare the returned candidate poses with the frozen original poses only in
+   the evaluator.
+
+The default profiles reach 5/10/15 cm translation and 0.5/1/2 degrees yaw.
+Perturbations vary smoothly with exact frame timestamps on both sides of the
+anchor so this test measures registration recovery rather than deliberately
+violating the trajectory guard. Pose-only and trajectory-only frames are not
+perturbed because Stage 3 does not consume them.
+
+Every run reports per-frame input and output pose residuals, RMS residuals,
+recovery fractions, improved-frame fractions, and registration disposition.
+Its review bundle uses the exact same selected points and frame colors in three
+shared-axis views:
+
+```text
+REFERENCE  frozen original model-track alignment; proxy only, not gold
+INPUT      deterministic perturbed alignment seen by Stage 3
+OUTPUT     anchored-aggregation candidate, or unchanged input when rejected
+```
+
+The reference is intentionally named a proxy. A low residual proves recovery
+of a known injected error around that model track; it does not prove that the
+model track is physically correct. Anchor error and a common bias applied to
+every frame are unobservable in the current anchored gauge and remain explicit
+non-goals of this benchmark. End-to-end crop robustness is evaluated
+separately by perturbing before component selection; it must not be conflated
+with this isolated Stage 3 test.
 
 ## Human acceptance
 
@@ -200,6 +242,12 @@ During the dense-first MVP, algorithm cards also state whether the instance
 passes the current dense-track gate. Dense-supported cards sort before
 out-of-scope sparse cards inside each Clip, but the catalog continues to show
 every instance; scope filtering must not hide failures or sparse evidence.
+
+Controlled recovery has its own tabbed suite. Each top-level tab is one real
+source case, and the profile cards show reference/input/output comparison
+figures plus the numeric residual reduction. The real Clip catalog may link to
+this suite as a related diagnostic, but controlled cases are never inserted as
+fake source Clips or presented as annotation results.
 
 Catalog cards name their alignment source. A frozen model track may be shown
 as a coarse-track baseline before refinement. Current source annotations may

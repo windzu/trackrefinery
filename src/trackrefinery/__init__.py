@@ -22,6 +22,22 @@ from trackrefinery.contracts import (
     RefinementSuccess,
     TrackObservation,
 )
+from trackrefinery.controlled_recovery import (
+    CONTROLLED_RECOVERY_CONTRACT,
+    DEFAULT_CONTROLLED_PERTURBATION_PROFILES,
+    ControlledFramePerturbation,
+    ControlledFrameRecovery,
+    ControlledPerturbationProfile,
+    ControlledRecoveryReport,
+    ControlledRecoveryRun,
+    run_controlled_recovery,
+)
+from trackrefinery.controlled_recovery_review import (
+    CONTROLLED_RECOVERY_REVIEW_CONTRACT,
+    CONTROLLED_RECOVERY_SUITE_CONTRACT,
+    build_controlled_recovery_bundle,
+    build_controlled_recovery_suite,
+)
 from trackrefinery.dataset import InferenceDataset
 from trackrefinery.evaluation import (
     AcceptanceThresholds,
@@ -70,6 +86,10 @@ from trackrefinery.targets import GoldFramePose, GoldTarget, TargetDataset
 __all__ = [
     "COMPONENT_CONSENSUS_ALGORITHM_VERSION",
     "COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION",
+    "CONTROLLED_RECOVERY_CONTRACT",
+    "CONTROLLED_RECOVERY_REVIEW_CONTRACT",
+    "CONTROLLED_RECOVERY_SUITE_CONTRACT",
+    "DEFAULT_CONTROLLED_PERTURBATION_PROFILES",
     "EVIDENCE_TRACE_CONTRACT",
     "GEOMETRIC_ALGORITHM_VERSION",
     "GEOMETRIC_CONFIG_SCHEMA_VERSION",
@@ -81,6 +101,11 @@ __all__ = [
     "CanonicalShapeTrace",
     "ComponentConsensusRefiner",
     "ComponentConsensusSettings",
+    "ControlledFramePerturbation",
+    "ControlledFrameRecovery",
+    "ControlledPerturbationProfile",
+    "ControlledRecoveryReport",
+    "ControlledRecoveryRun",
     "CuboidFitTrace",
     "EnvelopeFittingSettings",
     "EvaluationReport",
@@ -114,6 +139,8 @@ __all__ = [
     "X4DInferenceExport",
     "aggregate_geometry_components",
     "build_clip_review_suite",
+    "build_controlled_recovery_bundle",
+    "build_controlled_recovery_suite",
     "build_review_bundle",
     "build_review_suite",
     "evaluate_case",
@@ -123,6 +150,7 @@ __all__ = [
     "read_geometric_trace",
     "read_outcome",
     "register_canonical_shape",
+    "run_controlled_recovery",
     "select_initial_evidence",
     "select_object_components",
     "validate_geometric_trace",

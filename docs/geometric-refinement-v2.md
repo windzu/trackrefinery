@@ -368,14 +368,19 @@ dimensions, and the exact rejection reason.
 3. **Implemented, pending real-catalog review:** deterministic ground removal,
    3D component selection, resolution-stability measurement, and conservative
    merged-component rejection.
-4. **Implemented, pending five-instance real review:** frame-role
-   classification and anchored geometry-frame aggregation, retaining baseline
-   poses when a candidate alignment regresses.
-5. Implement canonical size fitting and leave-one-frame-out stability.
-6. Implement fixed-size per-frame pose refinement and bounded trajectory-only
+4. **Implemented, pending recovery validation:** frame-role classification and
+   anchored geometry-frame aggregation, retaining baseline poses when a
+   candidate alignment regresses. Five dense real tracks establish
+   non-regression, but their naturally small input errors do not establish
+   correction capability.
+5. Validate Stage 3 against deterministic 5/10/15 cm and 0.5/1/2 degree
+   perturbations of frozen real selected components. Do not begin sizing until
+   the reference/input/output artifacts show useful known-error recovery.
+6. Implement canonical size fitting and leave-one-frame-out stability.
+7. Implement fixed-size per-frame pose refinement and bounded trajectory-only
    interpolation.
-7. Calibrate rejection thresholds on reviewed development/calibration tracks.
-8. Run frozen blind evaluation and X-Points correction-time review before any
+8. Calibrate rejection thresholds on reviewed development/calibration tracks.
+9. Run frozen blind evaluation and X-Points correction-time review before any
    MMDetection3D integration is called usable.
 
 Each implementation stage must produce a reviewable real-data artifact. Clean

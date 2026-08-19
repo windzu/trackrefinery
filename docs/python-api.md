@@ -102,6 +102,45 @@ inseparable component`, `other ROI points`, and `removed ground` labels. Dense
 supported tracks also receive a same-selected-point BEFORE/AFTER view of the
 input-track alignment and provisional anchored alignment.
 
+## Validate known-error Stage 3 recovery
+
+`run_controlled_recovery()` is an evaluator-side diagnostic. It reuses frozen
+component indices, injects deterministic smooth drift into non-anchor geometry
+poses, and runs aggregation against that perturbed case. The original model
+poses remain a proxy reference outside the algorithm run.
+
+```python
+from trackrefinery import (
+    DEFAULT_CONTROLLED_PERTURBATION_PROFILES,
+    build_controlled_recovery_bundle,
+    run_controlled_recovery,
+)
+
+recovery = run_controlled_recovery(
+    case,
+    profile=DEFAULT_CONTROLLED_PERTURBATION_PROFILES[-1],
+    component_trace=run.trace,
+)
+print(recovery.report.translation_rms_reduction_fraction)
+print(recovery.report.yaw_rms_reduction_fraction)
+build_controlled_recovery_bundle(
+    recovery,
+    "review/recovery/strong",
+    data_source="frozen model-track proxy",
+)
+```
+
+The default profiles are 5 cm / 0.5 degrees, 10 cm / 1 degree, and 15 cm /
+2 degrees. `build_controlled_recovery_suite()` indexes their bundles with one
+tab per source case. The CLI equivalent is:
+
+```bash
+trackrefinery-build-controlled-recovery-suite \
+  --inference-root my-data/inference \
+  --case-id scene-001_vehicle-0042 \
+  --output review/recovery
+```
+
 ## Load source-only input
 
 ```python
