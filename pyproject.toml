@@ -49,6 +49,7 @@ trackrefinery-generate-synthetic = "trackrefinery.synthetic:main"
 trackrefinery-evaluate = "trackrefinery.cli:evaluate_main"
 trackrefinery-evaluate-suite = "trackrefinery.cli:evaluate_suite_main"
 trackrefinery-build-review = "trackrefinery.cli:build_review_main"
+trackrefinery-build-review-suite = "trackrefinery.cli:build_review_suite_main"
 trackrefinery-review = "trackrefinery.cli:review_main"
 
 [project.urls]

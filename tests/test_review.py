@@ -15,7 +15,7 @@ from trackrefinery import (
 from trackrefinery.cli import build_review_main
 from trackrefinery.dataset import InferenceDataset
 from trackrefinery.evaluation import evaluate_case
-from trackrefinery.review import build_review_bundle
+from trackrefinery.review import build_review_bundle, build_review_suite
 from trackrefinery.synthetic import generate_dataset
 from trackrefinery.targets import TargetDataset
 
@@ -47,6 +47,7 @@ def test_review_bundle_contains_reproducible_and_interactive_views(
     expected = {
         "aggregate.npz",
         "bundle.json",
+        "gold_aggregate.npz",
         "metrics.json",
         "preview.html",
         "result.json",
@@ -55,13 +56,23 @@ def test_review_bundle_contains_reproducible_and_interactive_views(
     with np.load(bundle / "aggregate.npz", allow_pickle=False) as archive:
         assert archive["points_xyz"].shape[1] == 3
         assert len(archive["points_xyz"]) <= len(case.frames) * 1_000
+        aggregate_point_count = len(archive["points_xyz"])
     manifest = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
     assert manifest["contract_version"] == "trackrefinery-review-bundle-v1"
     assert manifest["has_evidence_trace"] is False
+    assert manifest["has_gold_aligned_aggregate"] is True
+    assert manifest["gold_aggregate_path"] == "gold_aggregate.npz"
+    with np.load(bundle / "gold_aggregate.npz", allow_pickle=False) as archive:
+        assert archive["points_xyz"].shape[1] == 3
+        assert len(archive["points_xyz"]) == aggregate_point_count
     html = (bundle / "preview.html").read_text(encoding="utf-8")
-    assert "Object-frame aggregate" in html
+    assert "Algorithm aggregate" in html
+    assert "Annotation aggregate" in html
+    assert "Annotation-pose-aligned aggregate (review only)" in html
+    assert "onclick=\"showView('annotation', this)\"" in html
     assert "Reviewer feedback" in html
     assert (bundle / "thumbnails" / "aggregate_top.png").is_file()
+    assert (bundle / "thumbnails" / "gold_aggregate_top.png").is_file()
 
 
 def test_review_bundle_renders_algorithm_evidence_trace(tmp_path: Path) -> None:
@@ -74,12 +85,16 @@ def test_review_bundle_renders_algorithm_evidence_trace(tmp_path: Path) -> None:
         run.outcome,
         tmp_path / "review-trace",
         trace=run.trace,
+        data_source="synthetic-v1 deterministic fixture",
         max_points_per_frame=300,
     )
 
     manifest = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
     assert manifest["has_evidence_trace"] is True
     assert manifest["has_registration_trace"] is True
+    assert manifest["has_cuboid_candidate"] is True
+    assert manifest["data_source"] == "synthetic-v1 deterministic fixture"
+    assert manifest["has_gold_aligned_aggregate"] is False
     assert (bundle / "evidence_trace.json").is_file()
     assert (bundle / "evidence_masks.npz").is_file()
     assert (bundle / "canonical_shape.npz").is_file()
@@ -89,10 +104,14 @@ def test_review_bundle_renders_algorithm_evidence_trace(tmp_path: Path) -> None:
         assert archive["evidence_state"].shape == (len(archive["points_xyz"]),)
         assert len(archive["points_xyz"]) <= len(case.frames) * 300
     html = (bundle / "preview.html").read_text(encoding="utf-8")
-    assert "Initial evidence classification" in html
+    assert "Current evidence classification" in html
     assert "Evidence trace" in html
     assert "registration candidate" in html
-    assert "Provisional canonical shape (registration only)" in html
+    assert "Canonical shape after alternating registration" in html
+    assert "synthetic-v1 deterministic fixture" in html
+    assert "Trace-only cuboid candidate" in html
+    assert "cuboid candidate" in html
+    assert "Annotation aggregate" not in html
 
 
 def test_review_cli_accepts_portable_evidence_trace(tmp_path: Path) -> None:
@@ -114,6 +133,8 @@ def test_review_cli_accepts_portable_evidence_trace(tmp_path: Path) -> None:
             str(result_path),
             "--trace",
             str(trace_dir / "evidence_trace.json"),
+            "--data-source",
+            "synthetic-cli-fixture",
             "--output",
             str(tmp_path / "review-cli"),
         ]
@@ -121,3 +142,50 @@ def test_review_cli_accepts_portable_evidence_trace(tmp_path: Path) -> None:
 
     assert status == 0
     assert (tmp_path / "review-cli" / "evidence_masks.npz").is_file()
+    manifest = json.loads(
+        (tmp_path / "review-cli" / "bundle.json").read_text(encoding="utf-8")
+    )
+    assert manifest["data_source"] == "synthetic-cli-fixture"
+
+
+def test_review_suite_indexes_case_bundles_as_tabs(tmp_path: Path) -> None:
+    generated = generate_dataset(tmp_path / "synthetic")
+    inference = InferenceDataset.open(generated.inference_root)
+    targets = TargetDataset.open(generated.target_root)
+    suite_root = tmp_path / "suite"
+    bundles = []
+    for case_id in ("static_complete", "moving_complete"):
+        case = inference.load_case(case_id)
+        target = targets.load_target(case_id)
+        run = JointCuboidRefiner().refine_with_trace(case)
+        bundles.append(
+            build_review_bundle(
+                case,
+                run.outcome,
+                suite_root / "cases" / case_id,
+                target=target,
+                trace=run.trace,
+                data_source="synthetic-v1 deterministic fixture",
+                max_points_per_frame=200,
+            )
+        )
+
+    output = build_review_suite(
+        suite_root,
+        bundles,
+        title="Synthetic regression suite",
+    )
+
+    manifest = json.loads((output / "suite.json").read_text(encoding="utf-8"))
+    assert manifest["contract_version"] == "trackrefinery-review-suite-v1"
+    assert [row["case_id"] for row in manifest["cases"]] == [
+        "static_complete",
+        "moving_complete",
+    ]
+    assert all(row["has_gold_aligned_aggregate"] for row in manifest["cases"])
+    html = (output / "index.html").read_text(encoding="utf-8")
+    assert "Synthetic regression suite" in html
+    assert "static_complete" in html
+    assert "moving_complete" in html
+    assert html.count('class="case-tab') == 2
+    assert html.count("<iframe") == 2

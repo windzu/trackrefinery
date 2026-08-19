@@ -318,6 +318,118 @@ class CanonicalShapeTrace:
 
 
 @dataclass(frozen=True, slots=True)
+class CuboidFitTrace:
+    """Trace-only visible-envelope cuboid candidate in registration coordinates."""
+
+    status: str
+    reason_codes: tuple[str, ...]
+    canonical_size_lwh: tuple[float, float, float] | None
+    center_in_registration_xyz: tuple[float, float, float] | None
+    lower_envelope_xyz: tuple[float, float, float] | None
+    upper_envelope_xyz: tuple[float, float, float] | None
+    face_support_counts: tuple[int, int, int, int, int, int]
+    alternations: int
+    converged: bool
+
+    def __post_init__(self) -> None:
+        if self.status not in {"candidate", "insufficient_evidence"}:
+            raise ValueError("cuboid fit status is unsupported")
+        reasons = tuple(self.reason_codes)
+        tuples = (
+            self.canonical_size_lwh,
+            self.center_in_registration_xyz,
+            self.lower_envelope_xyz,
+            self.upper_envelope_xyz,
+        )
+        if self.status == "candidate":
+            if reasons or any(value is None for value in tuples):
+                raise ValueError("cuboid candidate requires complete geometry")
+        elif not reasons or any(not value for value in reasons):
+            raise ValueError("insufficient cuboid fit requires reason codes")
+        for name, value in zip(
+            ("canonical_size_lwh", "center", "lower_envelope", "upper_envelope"),
+            tuples,
+            strict=True,
+        ):
+            if value is not None:
+                parsed = tuple(float(item) for item in value)
+                if len(parsed) != 3 or not np.isfinite(parsed).all():
+                    raise ValueError(f"cuboid {name} must be a finite triplet")
+                object.__setattr__(
+                    self,
+                    {
+                        "center": "center_in_registration_xyz",
+                        "lower_envelope": "lower_envelope_xyz",
+                        "upper_envelope": "upper_envelope_xyz",
+                    }.get(name, name),
+                    parsed,
+                )
+        if self.canonical_size_lwh is not None and any(
+            value <= 0 for value in self.canonical_size_lwh
+        ):
+            raise ValueError("cuboid dimensions must be positive")
+        counts = tuple(int(value) for value in self.face_support_counts)
+        if len(counts) != 6 or any(value < 0 for value in counts):
+            raise ValueError("face_support_counts must contain six non-negative values")
+        if self.alternations < 1:
+            raise ValueError("cuboid alternations must be positive")
+        if not isinstance(self.converged, bool):
+            raise ValueError("cuboid converged must be boolean")
+        object.__setattr__(self, "reason_codes", reasons)
+        object.__setattr__(self, "face_support_counts", counts)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "reason_codes": list(self.reason_codes),
+            "canonical_size_lwh": _optional_triplet_list(self.canonical_size_lwh),
+            "center_in_registration_xyz": _optional_triplet_list(
+                self.center_in_registration_xyz
+            ),
+            "lower_envelope_xyz": _optional_triplet_list(self.lower_envelope_xyz),
+            "upper_envelope_xyz": _optional_triplet_list(self.upper_envelope_xyz),
+            "face_support_counts": list(self.face_support_counts),
+            "alternations": self.alternations,
+            "converged": self.converged,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> CuboidFitTrace:
+        if not isinstance(value, dict):
+            raise ValueError("cuboid_fit must be an object")
+        reasons = value.get("reason_codes")
+        counts = value.get("face_support_counts")
+        if not isinstance(reasons, list) or any(
+            not isinstance(reason, str) for reason in reasons
+        ):
+            raise ValueError("cuboid reason_codes must be a string list")
+        if not isinstance(counts, list) or len(counts) != 6:
+            raise ValueError("cuboid face_support_counts must contain six values")
+        return cls(
+            status=_string(value.get("status"), "cuboid status"),
+            reason_codes=tuple(reasons),
+            canonical_size_lwh=_optional_float_triplet(
+                value.get("canonical_size_lwh"), "canonical_size_lwh"
+            ),
+            center_in_registration_xyz=_optional_float_triplet(
+                value.get("center_in_registration_xyz"),
+                "center_in_registration_xyz",
+            ),
+            lower_envelope_xyz=_optional_float_triplet(
+                value.get("lower_envelope_xyz"), "lower_envelope_xyz"
+            ),
+            upper_envelope_xyz=_optional_float_triplet(
+                value.get("upper_envelope_xyz"), "upper_envelope_xyz"
+            ),
+            face_support_counts=tuple(
+                _integer(item, "face_support_counts[]") for item in counts
+            ),  # type: ignore[arg-type]
+            alternations=_integer(value.get("alternations"), "alternations"),
+            converged=_boolean(value.get("converged"), "cuboid converged"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class GeometricRefinementTrace:
     """One deterministic algorithm-stage trace for a refinement case."""
 
@@ -330,6 +442,7 @@ class GeometricRefinementTrace:
     stage: str
     frames: tuple[FrameEvidenceTrace, ...]
     canonical_shape: CanonicalShapeTrace | None = None
+    cuboid_fit: CuboidFitTrace | None = None
 
     def __post_init__(self) -> None:
         string_values = (
@@ -368,6 +481,12 @@ class GeometricRefinementTrace:
             unknown = set(self.canonical_shape.registered_frame_ids) - set(frame_ids)
             if unknown:
                 raise ValueError("canonical shape references unknown registered frames")
+        if (
+            self.cuboid_fit is not None
+            and self.cuboid_fit.status == "candidate"
+            and self.canonical_shape is None
+        ):
+            raise ValueError("cuboid candidate requires a canonical shape")
         object.__setattr__(self, "frames", frames)
 
     @property
@@ -401,6 +520,9 @@ class GeometricRefinementTrace:
                 if self.canonical_shape is None
                 else self.canonical_shape.to_summary_dict()
             ),
+            "cuboid_fit": None
+            if self.cuboid_fit is None
+            else self.cuboid_fit.to_dict(),
         }
 
 
@@ -594,6 +716,8 @@ def read_geometric_trace(path: str | Path) -> GeometricRefinementTrace:
     settings_json = json.dumps(
         settings, sort_keys=True, separators=(",", ":"), allow_nan=False
     )
+    cuboid_row = payload.get("cuboid_fit")
+    cuboid_fit = None if cuboid_row is None else CuboidFitTrace.from_dict(cuboid_row)
     return GeometricRefinementTrace(
         case_id=_string(payload.get("case_id"), "case_id"),
         track_id=_string(payload.get("track_id"), "track_id"),
@@ -608,6 +732,7 @@ def read_geometric_trace(path: str | Path) -> GeometricRefinementTrace:
         stage=_string(payload.get("stage"), "stage"),
         frames=tuple(frames),
         canonical_shape=canonical_shape,
+        cuboid_fit=cuboid_fit,
     )
 
 
@@ -646,6 +771,18 @@ def _float_triplet(value: object, name: str) -> tuple[float, float, float]:
     if not isinstance(value, list) or len(value) != 3:
         raise ValueError(f"{name} must be a three-value list")
     return tuple(_number(item, f"{name}[]") for item in value)  # type: ignore[return-value]
+
+
+def _optional_float_triplet(
+    value: object, name: str
+) -> tuple[float, float, float] | None:
+    return None if value is None else _float_triplet(value, name)
+
+
+def _optional_triplet_list(
+    value: tuple[float, float, float] | None,
+) -> list[float] | None:
+    return None if value is None else list(value)
 
 
 def _pose_to_dict(pose: Pose3D | None) -> dict[str, list[float]] | None:

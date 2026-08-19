@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 
 from trackrefinery.contracts import (
     Box3D,
+    Pose3D,
     RefinementCase,
     RefinementOutcome,
     RefinementSuccess,
@@ -22,6 +23,7 @@ from trackrefinery.contracts import (
 from trackrefinery.evaluation import EvaluationReport
 from trackrefinery.geometric.trace import (
     CanonicalShapeTrace,
+    CuboidFitTrace,
     EvidenceState,
     GeometricRefinementTrace,
     validate_geometric_trace,
@@ -30,6 +32,7 @@ from trackrefinery.geometric.trace import (
 from trackrefinery.geometry import (
     BOX_EDGE_INDICES,
     box_corners,
+    compose_pose,
     inverse_transform_points,
 )
 from trackrefinery.refiner import validate_outcome
@@ -55,6 +58,7 @@ def build_review_bundle(
     target: GoldTarget | None = None,
     evaluation: EvaluationReport | None = None,
     trace: GeometricRefinementTrace | None = None,
+    data_source: str = "not declared",
     crop_scale: float = 1.8,
     max_points_per_frame: int = 8_000,
 ) -> Path:
@@ -71,6 +75,9 @@ def build_review_bundle(
         raise ValueError("evaluation does not belong to the review case")
     if trace is not None:
         validate_geometric_trace(case, trace)
+    if not isinstance(data_source, str) or not data_source.strip():
+        raise ValueError("data_source must be a non-empty string")
+    data_source = data_source.strip()
 
     output = Path(output_dir).resolve()
     thumbnails = output / "thumbnails"
@@ -89,11 +96,14 @@ def build_review_bundle(
 
     aggregate_groups: list[NDArray[np.float32]] = []
     frame_indices: list[NDArray[np.int16]] = []
+    gold_aggregate_groups: list[NDArray[np.float32]] = []
+    gold_frame_indices: list[NDArray[np.int16]] = []
     preview_frames: list[dict[str, object]] = []
     evidence_states: list[NDArray[np.uint8]] = []
     trace_by_frame = (
         {frame.frame_id: frame for frame in trace.frames} if trace is not None else {}
     )
+    cuboid_fit = None if trace is None else trace.cuboid_fit
     for frame_index, frame in enumerate(case.frames):
         observation = observations[frame.frame_id]
         coarse_box = observation.coarse_box
@@ -117,6 +127,7 @@ def build_review_bundle(
         )
         frame_trace = trace_by_frame.get(frame.frame_id)
         registration_box = None
+        cuboid_candidate_box = None
         if (
             frame_trace is not None
             and frame_trace.registration is not None
@@ -128,6 +139,24 @@ def build_review_bundle(
                 coarse_box.size_lwh,
                 candidate_pose.orientation_xyzw,
             )
+            if (
+                cuboid_fit is not None
+                and cuboid_fit.status == "candidate"
+                and cuboid_fit.canonical_size_lwh is not None
+                and cuboid_fit.center_in_registration_xyz is not None
+            ):
+                cuboid_pose = compose_pose(
+                    candidate_pose,
+                    Pose3D(
+                        cuboid_fit.center_in_registration_xyz,
+                        (0.0, 0.0, 0.0, 1.0),
+                    ),
+                )
+                cuboid_candidate_box = Box3D(
+                    cuboid_pose.translation_xyz,
+                    cuboid_fit.canonical_size_lwh,
+                    cuboid_pose.orientation_xyzw,
+                )
         if frame_trace is None:
             points = _preview_points(
                 frame.points_xyz,
@@ -152,13 +181,25 @@ def build_review_bundle(
             if refined_box is not None
             else (
                 registration_box.pose
-                if registration_box is not None
-                else coarse_box.pose
+                if cuboid_candidate_box is None and registration_box is not None
+                else (
+                    cuboid_candidate_box.pose
+                    if cuboid_candidate_box is not None
+                    else coarse_box.pose
+                )
             )
         )
         local = inverse_transform_points(points, alignment_pose).astype(np.float32)
         aggregate_groups.append(local)
         frame_indices.append(np.full(len(local), frame_index, dtype=np.int16))
+        if gold_box is not None:
+            gold_local = inverse_transform_points(points, gold_box.pose).astype(
+                np.float32
+            )
+            gold_aggregate_groups.append(gold_local)
+            gold_frame_indices.append(
+                np.full(len(gold_local), frame_index, dtype=np.int16)
+            )
         if point_states is not None:
             evidence_states.append(point_states)
         preview_frames.append(
@@ -168,6 +209,7 @@ def build_review_bundle(
                 "coarse_box": coarse_box,
                 "refined_box": refined_box,
                 "registration_box": registration_box,
+                "cuboid_candidate_box": cuboid_candidate_box,
                 "gold_box": gold_box,
                 "point_states": point_states,
             }
@@ -175,6 +217,12 @@ def build_review_bundle(
 
     aggregate = np.concatenate(aggregate_groups)
     aggregate_frame_index = np.concatenate(frame_indices)
+    gold_aggregate = (
+        np.concatenate(gold_aggregate_groups) if gold_aggregate_groups else None
+    )
+    gold_aggregate_frame_index = (
+        np.concatenate(gold_frame_indices) if gold_frame_indices else None
+    )
     aggregate_evidence_state = (
         np.concatenate(evidence_states) if trace is not None else None
     )
@@ -186,6 +234,15 @@ def build_review_bundle(
     if aggregate_evidence_state is not None:
         aggregate_payload["evidence_state"] = aggregate_evidence_state
     np.savez_compressed(output / "aggregate.npz", **aggregate_payload)
+    if gold_aggregate is not None and gold_aggregate_frame_index is not None:
+        gold_payload = {
+            "points_xyz": gold_aggregate,
+            "frame_index": gold_aggregate_frame_index,
+            "frame_ids": np.asarray([frame.frame_id for frame in case.frames]),
+        }
+        if aggregate_evidence_state is not None:
+            gold_payload["evidence_state"] = aggregate_evidence_state
+        np.savez_compressed(output / "gold_aggregate.npz", **gold_payload)
     canonical_shape = None if trace is None else trace.canonical_shape
     if canonical_shape is not None:
         np.savez_compressed(
@@ -207,17 +264,28 @@ def build_review_bundle(
         "case_id": case.case_id,
         "track_id": case.track.track_id,
         "outcome_status": outcome.status,
+        "data_source": data_source,
         "frame_ids": [frame.frame_id for frame in case.frames],
         "crop_scale": crop_scale,
         "max_points_per_frame": max_points_per_frame,
         "has_gold_target": target is not None,
+        "has_gold_aligned_aggregate": gold_aggregate is not None,
         "has_metrics": evaluation is not None,
         "has_evidence_trace": trace is not None,
         "has_registration_trace": canonical_shape is not None,
+        "has_cuboid_candidate": (
+            cuboid_fit is not None and cuboid_fit.status == "candidate"
+        ),
+        "cuboid_candidate_size_lwh": (
+            None if cuboid_fit is None else cuboid_fit.canonical_size_lwh
+        ),
         "evidence_trace_path": "evidence_trace.json" if trace is not None else None,
         "evidence_masks_path": "evidence_masks.npz" if trace is not None else None,
         "canonical_shape_path": (
             "canonical_shape.npz" if canonical_shape is not None else None
+        ),
+        "gold_aggregate_path": (
+            "gold_aggregate.npz" if gold_aggregate is not None else None
         ),
     }
     (output / "bundle.json").write_text(
@@ -229,12 +297,15 @@ def build_review_bundle(
         thumbnails,
         aggregate,
         aggregate_frame_index,
+        gold_aggregate,
+        gold_aggregate_frame_index,
         aggregate_evidence_state,
         preview_frames,
         outcome,
         target,
         evaluation,
         canonical_shape,
+        cuboid_fit,
     )
     _write_html(
         output / "preview.html",
@@ -242,12 +313,140 @@ def build_review_bundle(
         outcome,
         aggregate,
         aggregate_frame_index,
+        gold_aggregate,
+        gold_aggregate_frame_index,
         aggregate_evidence_state,
         preview_frames,
         target,
         evaluation,
         trace,
+        data_source,
     )
+    return output
+
+
+def build_review_suite(
+    output_dir: str | Path,
+    bundle_dirs: list[str | Path] | tuple[str | Path, ...],
+    *,
+    title: str = "TrackRefinery review suite",
+) -> Path:
+    """Write a tabbed index for case bundles contained under one suite root."""
+
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("title must be a non-empty string")
+    output = Path(output_dir).resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, object]] = []
+    seen_case_ids: set[str] = set()
+    for bundle_dir in bundle_dirs:
+        bundle = Path(bundle_dir).resolve()
+        try:
+            bundle.relative_to(output)
+        except ValueError as error:
+            raise ValueError(
+                "review suite bundles must be inside output_dir"
+            ) from error
+        preview = bundle / "preview.html"
+        manifest_path = bundle / "bundle.json"
+        if not preview.is_file() or not manifest_path.is_file():
+            raise ValueError(f"{bundle} is not a review bundle")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            raise ValueError(f"{manifest_path} must contain an object")
+        case_id = manifest.get("case_id")
+        if not isinstance(case_id, str) or not case_id:
+            raise ValueError(f"{manifest_path} has no case_id")
+        if case_id in seen_case_ids:
+            raise ValueError(f"duplicate review case_id: {case_id}")
+        seen_case_ids.add(case_id)
+        rows.append(
+            {
+                "case_id": case_id,
+                "track_id": manifest.get("track_id"),
+                "outcome_status": manifest.get("outcome_status"),
+                "data_source": manifest.get("data_source"),
+                "has_gold_aligned_aggregate": manifest.get(
+                    "has_gold_aligned_aggregate", False
+                ),
+                "cuboid_candidate_size_lwh": manifest.get("cuboid_candidate_size_lwh"),
+                "preview_path": preview.relative_to(output).as_posix(),
+            }
+        )
+    if not rows:
+        raise ValueError("review suite requires at least one case bundle")
+
+    suite_manifest = {
+        "contract_version": "trackrefinery-review-suite-v1",
+        "title": title.strip(),
+        "cases": rows,
+    }
+    (output / "suite.json").write_text(
+        json.dumps(suite_manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    buttons = []
+    panels = []
+    for index, row in enumerate(rows):
+        case_id = str(row["case_id"])
+        case_label = html_module.escape(case_id)
+        status = html_module.escape(str(row["outcome_status"]))
+        preview_path = html_module.escape(str(row["preview_path"]), quote=True)
+        active = " active" if index == 0 else ""
+        buttons.append(
+            f'<button class="case-tab{active}" onclick="showCase({index}, this)">'
+            f"{case_label}<small>{status}</small></button>"
+        )
+        src = f' src="{preview_path}"' if index == 0 else ""
+        panels.append(
+            f'<div id="case-{index}" class="case-panel{active}">'
+            f'<iframe data-src="{preview_path}"{src} title="{case_label}"></iframe>'
+            "</div>"
+        )
+    title_display = html_module.escape(title.strip())
+    suite_html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{title_display}</title>
+  <style>
+    body {{ font-family: system-ui; margin: 0; background: #0f172a; color: #e5e7eb; }}
+    header {{ padding: 14px 18px 8px; }}
+    h1 {{ margin: 0 0 12px; font-size: 22px; }}
+    nav {{ display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }}
+    .case-tab {{ flex: 0 0 auto; min-width: 155px; padding: 9px 12px;
+      border: 1px solid #475569; border-radius: 8px; background: #1e293b;
+      color: #e5e7eb; cursor: pointer; text-align: left; }}
+    .case-tab small {{ display: block; color: #94a3b8; margin-top: 3px; }}
+    .case-tab.active {{ background: #1d4ed8; border-color: #60a5fa; }}
+    .case-tab.active small {{ color: #dbeafe; }}
+    .case-panel {{ display: none; height: calc(100vh - 116px); }}
+    .case-panel.active {{ display: block; }}
+    iframe {{ width: 100%; height: 100%; border: 0; background: #111827; }}
+  </style>
+</head>
+<body>
+  <header><h1>{title_display}</h1><nav>{"".join(buttons)}</nav></header>
+  {"".join(panels)}
+  <script>
+  function showCase(index, button) {{
+    document.querySelectorAll('.case-panel').forEach(
+      element => element.classList.remove('active')
+    );
+    document.querySelectorAll('.case-tab').forEach(
+      element => element.classList.remove('active')
+    );
+    const panel = document.getElementById('case-' + index);
+    const frame = panel.querySelector('iframe');
+    if (!frame.getAttribute('src')) frame.setAttribute('src', frame.dataset.src);
+    panel.classList.add('active');
+    button.classList.add('active');
+  }}
+  </script>
+</body>
+</html>"""
+    (output / "index.html").write_text(suite_html, encoding="utf-8")
     return output
 
 
@@ -258,11 +457,12 @@ def serve_review_bundle(
     port: int = 8000,
     open_browser: bool = False,
 ) -> None:
-    """Serve a generated bundle without requiring X-4D or X-Points."""
+    """Serve a generated case bundle or suite without X-4D or X-Points."""
 
     root = Path(bundle_dir).resolve()
-    if not (root / "preview.html").is_file():
-        raise ValueError(f"{root} is not a review bundle")
+    entrypoint = "preview.html" if (root / "preview.html").is_file() else "index.html"
+    if not (root / entrypoint).is_file():
+        raise ValueError(f"{root} is not a review bundle or suite")
 
     class BundleHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args: object, **kwargs: object) -> None:
@@ -270,7 +470,7 @@ def serve_review_bundle(
 
     server = ThreadingHTTPServer((host, port), BundleHandler)
     address, bound_port = server.server_address[:2]
-    url = f"http://{address}:{bound_port}/preview.html"
+    url = f"http://{address}:{bound_port}/{entrypoint}"
     print(f"TrackRefinery review: {url}")
     if open_browser:
         threading.Timer(0.2, webbrowser.open, args=(url,)).start()
@@ -336,12 +536,15 @@ def _write_thumbnails(
     output: Path,
     aggregate: NDArray[np.float32],
     frame_index: NDArray[np.int16],
+    gold_aggregate: NDArray[np.float32] | None,
+    gold_frame_index: NDArray[np.int16] | None,
     evidence_state: NDArray[np.uint8] | None,
     preview_frames: list[dict[str, object]],
     outcome: RefinementOutcome,
     target: GoldTarget | None,
     evaluation: EvaluationReport | None,
     canonical_shape: CanonicalShapeTrace | None,
+    cuboid_fit: CuboidFitTrace | None,
 ) -> None:
     try:
         import matplotlib
@@ -371,23 +574,32 @@ def _write_thumbnails(
         size = (
             outcome.canonical_size_lwh
             if isinstance(outcome, RefinementSuccess)
-            else tuple(
-                np.median(
-                    [
-                        item["coarse_box"].size_lwh
-                        for item in preview_frames
-                        if isinstance(item["coarse_box"], Box3D)
-                    ],
-                    axis=0,
+            else (
+                cuboid_fit.canonical_size_lwh
+                if cuboid_fit is not None
+                and cuboid_fit.status == "candidate"
+                and cuboid_fit.canonical_size_lwh is not None
+                else tuple(
+                    np.median(
+                        [
+                            item["coarse_box"].size_lwh
+                            for item in preview_frames
+                            if isinstance(item["coarse_box"], Box3D)
+                        ],
+                        axis=0,
+                    )
                 )
             )
         )
-        result_label = (
-            "result" if isinstance(outcome, RefinementSuccess) else "coarse median"
-        )
-        result_color = (
-            "#00c853" if isinstance(outcome, RefinementSuccess) else "#d500f9"
-        )
+        if isinstance(outcome, RefinementSuccess):
+            result_label = "result"
+            result_color = "#00c853"
+        elif cuboid_fit is not None and cuboid_fit.status == "candidate":
+            result_label = "cuboid candidate (not released)"
+            result_color = "#d500f9"
+        else:
+            result_label = "coarse median"
+            result_color = "#7c4dff"
         _plot_box_projection(
             axis,
             Box3D((0.0, 0.0, 0.0), size, (0.0, 0.0, 0.0, 1.0)),
@@ -412,6 +624,53 @@ def _write_thumbnails(
         figure.savefig(output / name, dpi=140)
         plt.close(figure)
 
+    if (
+        gold_aggregate is not None
+        and gold_frame_index is not None
+        and target is not None
+    ):
+        figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
+        axis.scatter(
+            gold_aggregate[:, 0],
+            gold_aggregate[:, 1],
+            c=gold_frame_index,
+            s=1,
+            cmap="turbo",
+            alpha=0.55,
+        )
+        _plot_box_projection(
+            axis,
+            Box3D(
+                (0.0, 0.0, 0.0),
+                target.canonical_size_lwh,
+                (0.0, 0.0, 0.0, 1.0),
+            ),
+            0,
+            1,
+            "#00b8d4",
+            "gold size",
+        )
+        if cuboid_fit is not None and cuboid_fit.canonical_size_lwh is not None:
+            _plot_box_projection(
+                axis,
+                Box3D(
+                    (0.0, 0.0, 0.0),
+                    cuboid_fit.canonical_size_lwh,
+                    (0.0, 0.0, 0.0, 1.0),
+                ),
+                0,
+                1,
+                "#d500f9",
+                "cuboid candidate size",
+            )
+        axis.set_title("Annotation-pose-aligned aggregate")
+        axis.set_xlabel("gold object X (m)")
+        axis.set_ylabel("gold object Y (m)")
+        axis.set_aspect("equal", adjustable="box")
+        axis.legend(loc="best")
+        figure.savefig(output / "gold_aggregate_top.png", dpi=140)
+        plt.close(figure)
+
     if canonical_shape is not None:
         figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
         scatter = axis.scatter(
@@ -423,10 +682,29 @@ def _write_thumbnails(
             alpha=0.75,
         )
         figure.colorbar(scatter, ax=axis, label="supporting frames")
-        axis.set_title("Provisional canonical shape (registration only)")
+        axis.set_title("Canonical shape after alternating registration")
         axis.set_xlabel("canonical X (m)")
         axis.set_ylabel("canonical Y (m)")
         axis.set_aspect("equal", adjustable="box")
+        if (
+            cuboid_fit is not None
+            and cuboid_fit.status == "candidate"
+            and cuboid_fit.canonical_size_lwh is not None
+            and cuboid_fit.center_in_registration_xyz is not None
+        ):
+            _plot_box_projection(
+                axis,
+                Box3D(
+                    cuboid_fit.center_in_registration_xyz,
+                    cuboid_fit.canonical_size_lwh,
+                    (0.0, 0.0, 0.0, 1.0),
+                ),
+                0,
+                1,
+                "#d500f9",
+                "visible-envelope candidate",
+            )
+            axis.legend(loc="best")
         figure.savefig(output / "canonical_registration_top.png", dpi=140)
         plt.close(figure)
 
@@ -438,10 +716,10 @@ def _write_thumbnails(
             Box3D((0.0, 0.0, 0.0), size, (0.0, 0.0, 0.0, 1.0)),
             0,
             1,
-            "#d500f9",
-            "coarse median size",
+            result_color,
+            result_label,
         )
-        axis.set_title("Initial evidence classification")
+        axis.set_title("Current evidence classification")
         axis.set_xlabel("X (m)")
         axis.set_ylabel("Y (m)")
         axis.set_aspect("equal", adjustable="box")
@@ -460,7 +738,8 @@ def _write_thumbnails(
         axis.scatter(points[:, 0], points[:, 1], s=1, c="#9e9e9e", alpha=0.65)
     for key, color, label in (
         ("coarse_box", "#ffab00", "coarse"),
-        ("registration_box", "#d500f9", "registration candidate"),
+        ("registration_box", "#7c4dff", "registration candidate"),
+        ("cuboid_candidate_box", "#d500f9", "cuboid candidate"),
         ("refined_box", "#00c853", "refined"),
         ("gold_box", "#00b8d4", "gold"),
     ):
@@ -536,11 +815,14 @@ def _write_html(
     outcome: RefinementOutcome,
     aggregate: NDArray[np.float32],
     aggregate_frame_index: NDArray[np.int16],
+    gold_aggregate: NDArray[np.float32] | None,
+    gold_aggregate_frame_index: NDArray[np.int16] | None,
     aggregate_evidence_state: NDArray[np.uint8] | None,
     preview_frames: list[dict[str, object]],
     target: GoldTarget | None,
     evaluation: EvaluationReport | None,
     trace: GeometricRefinementTrace | None,
+    data_source: str,
 ) -> None:
     try:
         import plotly.graph_objects as go
@@ -566,18 +848,33 @@ def _write_html(
     result_size = (
         outcome.canonical_size_lwh
         if isinstance(outcome, RefinementSuccess)
-        else tuple(
-            np.median(
-                [item.coarse_box.size_lwh for item in case.track.observations], axis=0
+        else (
+            trace.cuboid_fit.canonical_size_lwh
+            if trace is not None
+            and trace.cuboid_fit is not None
+            and trace.cuboid_fit.status == "candidate"
+            and trace.cuboid_fit.canonical_size_lwh is not None
+            else tuple(
+                np.median(
+                    [item.coarse_box.size_lwh for item in case.track.observations],
+                    axis=0,
+                )
             )
         )
     )
-    result_label = (
-        "result size"
-        if isinstance(outcome, RefinementSuccess)
-        else "coarse median size (not refined)"
-    )
-    result_color = "#00c853" if isinstance(outcome, RefinementSuccess) else "#d500f9"
+    if isinstance(outcome, RefinementSuccess):
+        result_label = "result size"
+        result_color = "#00c853"
+    elif (
+        trace is not None
+        and trace.cuboid_fit is not None
+        and trace.cuboid_fit.status == "candidate"
+    ):
+        result_label = "cuboid candidate (not released)"
+        result_color = "#d500f9"
+    else:
+        result_label = "coarse median size (not refined)"
+        result_color = "#7c4dff"
     _add_plotly_box(
         aggregate_figure,
         Box3D((0.0, 0.0, 0.0), result_size, (0.0, 0.0, 0.0, 1.0)),
@@ -592,10 +889,60 @@ def _write_html(
             "#00b8d4",
         )
     aggregate_figure.update_layout(
-        title="Object-frame aggregate (points colored by frame)",
+        title="Algorithm-candidate-aligned aggregate (points colored by frame)",
         scene={"aspectmode": "data"},
         margin={"l": 0, "r": 0, "t": 45, "b": 0},
     )
+
+    gold_aggregate_figure = None
+    if (
+        gold_aggregate is not None
+        and gold_aggregate_frame_index is not None
+        and target is not None
+    ):
+        gold_aggregate_figure = go.Figure()
+        for index, frame in enumerate(case.frames):
+            points = gold_aggregate[gold_aggregate_frame_index == index]
+            gold_aggregate_figure.add_trace(
+                go.Scatter3d(
+                    x=points[:, 0],
+                    y=points[:, 1],
+                    z=points[:, 2],
+                    mode="markers",
+                    marker={"size": 1.5, "opacity": 0.55},
+                    name=frame.frame_id,
+                )
+            )
+        _add_plotly_box(
+            gold_aggregate_figure,
+            Box3D(
+                (0.0, 0.0, 0.0),
+                target.canonical_size_lwh,
+                (0.0, 0.0, 0.0, 1.0),
+            ),
+            "gold size",
+            "#00b8d4",
+        )
+        if (
+            trace is not None
+            and trace.cuboid_fit is not None
+            and trace.cuboid_fit.canonical_size_lwh is not None
+        ):
+            _add_plotly_box(
+                gold_aggregate_figure,
+                Box3D(
+                    (0.0, 0.0, 0.0),
+                    trace.cuboid_fit.canonical_size_lwh,
+                    (0.0, 0.0, 0.0, 1.0),
+                ),
+                "cuboid candidate size",
+                "#d500f9",
+            )
+        gold_aggregate_figure.update_layout(
+            title="Annotation-pose-aligned aggregate (review only)",
+            scene={"aspectmode": "data"},
+            margin={"l": 0, "r": 0, "t": 45, "b": 0},
+        )
 
     canonical_figure = None
     if trace is not None and trace.canonical_shape is not None:
@@ -619,10 +966,26 @@ def _write_html(
             ]
         )
         canonical_figure.update_layout(
-            title="Provisional canonical shape (registration only)",
+            title="Canonical shape after alternating registration",
             scene={"aspectmode": "data"},
             margin={"l": 0, "r": 0, "t": 45, "b": 0},
         )
+        if (
+            trace.cuboid_fit is not None
+            and trace.cuboid_fit.status == "candidate"
+            and trace.cuboid_fit.canonical_size_lwh is not None
+            and trace.cuboid_fit.center_in_registration_xyz is not None
+        ):
+            _add_plotly_box(
+                canonical_figure,
+                Box3D(
+                    trace.cuboid_fit.center_in_registration_xyz,
+                    trace.cuboid_fit.canonical_size_lwh,
+                    (0.0, 0.0, 0.0, 1.0),
+                ),
+                "visible-envelope candidate",
+                "#d500f9",
+            )
 
     evidence_figure = None
     if aggregate_evidence_state is not None:
@@ -632,11 +995,11 @@ def _write_html(
         _add_plotly_box(
             evidence_figure,
             Box3D((0.0, 0.0, 0.0), result_size, (0.0, 0.0, 0.0, 1.0)),
-            "coarse median size",
-            "#d500f9",
+            result_label,
+            result_color,
         )
         evidence_figure.update_layout(
-            title="Initial evidence classification",
+            title="Current evidence classification",
             scene={"aspectmode": "data"},
             margin={"l": 0, "r": 0, "t": 45, "b": 0},
         )
@@ -661,7 +1024,8 @@ def _write_html(
             ]
         for key, label, color in (
             ("coarse_box", "coarse", "#ffab00"),
-            ("registration_box", "registration candidate", "#d500f9"),
+            ("registration_box", "registration candidate", "#7c4dff"),
+            ("cuboid_candidate_box", "cuboid candidate", "#d500f9"),
             ("refined_box", "refined", "#00c853"),
             ("gold_box", "gold", "#00b8d4"),
         ):
@@ -705,18 +1069,25 @@ def _write_html(
     aggregate_html = pio.to_html(
         aggregate_figure, include_plotlyjs=True, full_html=False
     )
+    gold_aggregate_html = (
+        pio.to_html(
+            gold_aggregate_figure,
+            include_plotlyjs=False,
+            full_html=False,
+        )
+        if gold_aggregate_figure is not None
+        else ""
+    )
     canonical_html = (
         pio.to_html(canonical_figure, include_plotlyjs=False, full_html=False)
         if canonical_figure is not None
         else ""
     )
-    canonical_section = f"<section>{canonical_html}</section>" if canonical_html else ""
     evidence_html = (
         pio.to_html(evidence_figure, include_plotlyjs=False, full_html=False)
         if evidence_figure is not None
         else ""
     )
-    evidence_section = f"<section>{evidence_html}</section>" if evidence_html else ""
     frame_html = pio.to_html(frame_figure, include_plotlyjs=False, full_html=False)
     metrics_json = (
         json.dumps(evaluation.to_dict(), indent=2, sort_keys=True)
@@ -730,6 +1101,55 @@ def _write_html(
     )
     case_display = html_module.escape(case.case_id)
     track_display = html_module.escape(case.track.track_id)
+    source_display = html_module.escape(data_source)
+    candidate_display = (
+        "none"
+        if trace is None
+        or trace.cuboid_fit is None
+        or trace.cuboid_fit.status != "candidate"
+        or trace.cuboid_fit.canonical_size_lwh is None
+        else " x ".join(
+            f"{value:.3f} m" for value in trace.cuboid_fit.canonical_size_lwh
+        )
+    )
+    view_tabs = [
+        ("algorithm", "Algorithm aggregate", aggregate_html),
+    ]
+    if gold_aggregate_html:
+        view_tabs.append(("annotation", "Annotation aggregate", gold_aggregate_html))
+    if canonical_html:
+        view_tabs.append(("canonical", "Canonical shape", canonical_html))
+    if evidence_html:
+        view_tabs.append(("evidence", "Current evidence", evidence_html))
+    view_tabs.extend(
+        (
+            ("frames", "Per-frame result", frame_html),
+            (
+                "metrics",
+                "Metrics",
+                f"<h2>Metrics</h2><pre>{html_module.escape(metrics_json)}</pre>",
+            ),
+            (
+                "trace",
+                "Diagnostics",
+                f"<h2>Evidence trace</h2><pre>{html_module.escape(trace_json)}</pre>",
+            ),
+        )
+    )
+    view_buttons = "".join(
+        (
+            f'<button class="view-tab{" active" if index == 0 else ""}" '
+            f"onclick=\"showView('{tab_id}', this)\">{label}</button>"
+        )
+        for index, (tab_id, label, _) in enumerate(view_tabs)
+    )
+    view_panels = "".join(
+        (
+            f'<section id="view-{tab_id}" '
+            f'class="view-panel{" active" if index == 0 else ""}">{content}</section>'
+        )
+        for index, (tab_id, _, content) in enumerate(view_tabs)
+    )
     feedback_filename = json.dumps(f"feedback-{case.case_id}.json")
     html = f"""<!doctype html>
 <html lang="en">
@@ -745,18 +1165,22 @@ def _write_html(
     pre {{ max-height: 380px; overflow: auto; background: #0f172a;
       color: #d1fae5; padding: 12px; }}
     button {{ padding: 8px 14px; }}
+    .view-tabs {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }}
+    .view-tab {{ border: 1px solid #64748b; border-radius: 8px;
+      background: #1e293b; color: #e5e7eb; cursor: pointer; }}
+    .view-tab.active {{ background: #2563eb; border-color: #60a5fa; }}
+    .view-panel {{ display: none; }}
+    .view-panel.active {{ display: block; }}
   </style>
 </head>
 <body>
 <main>
   <h1>{case_display}</h1>
   <p>Track {track_display} · {outcome.status}</p>
-  <section>{aggregate_html}</section>
-  {canonical_section}
-  {evidence_section}
-  <section>{frame_html}</section>
-  <section><h2>Metrics</h2><pre>{metrics_json}</pre></section>
-  <section><h2>Evidence trace</h2><pre>{trace_json}</pre></section>
+  <p><strong>Data source:</strong> {source_display}</p>
+  <p><strong>Trace-only cuboid candidate:</strong> {candidate_display}</p>
+  <nav class="view-tabs">{view_buttons}</nav>
+  {view_panels}
   <section>
     <h2>Reviewer feedback</h2>
     <select id="verdict">
@@ -771,6 +1195,20 @@ def _write_html(
   </section>
 </main>
 <script>
+function showView(id, button) {{
+  document.querySelectorAll('.view-panel').forEach(
+    element => element.classList.remove('active')
+  );
+  document.querySelectorAll('.view-tab').forEach(
+    element => element.classList.remove('active')
+  );
+  const panel = document.getElementById('view-' + id);
+  panel.classList.add('active');
+  button.classList.add('active');
+  panel.querySelectorAll('.plotly-graph-div').forEach(
+    element => Plotly.Plots.resize(element)
+  );
+}}
 function downloadFeedback() {{
   const value = {{
     contract_version: 'trackrefinery-review-feedback-v1',

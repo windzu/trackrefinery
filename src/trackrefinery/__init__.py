@@ -26,6 +26,8 @@ from trackrefinery.geometric import (
     GEOMETRIC_ALGORITHM_VERSION,
     GEOMETRIC_CONFIG_SCHEMA_VERSION,
     CanonicalShapeTrace,
+    CuboidFitTrace,
+    EnvelopeFittingSettings,
     EvidenceSelectionSettings,
     EvidenceState,
     FrameEvidenceTrace,
@@ -36,6 +38,7 @@ from trackrefinery.geometric import (
     GroundPlaneEstimate,
     JointCuboidRefiner,
     RegistrationSettings,
+    fit_alternating_envelope,
     read_geometric_trace,
     register_canonical_shape,
     select_initial_evidence,
@@ -43,7 +46,7 @@ from trackrefinery.geometric import (
     write_geometric_trace,
 )
 from trackrefinery.refiner import TrackRefiner, validate_outcome
-from trackrefinery.review import build_review_bundle
+from trackrefinery.review import build_review_bundle, build_review_suite
 from trackrefinery.serde import read_outcome, write_outcome
 from trackrefinery.targets import GoldFramePose, GoldTarget, TargetDataset
 
@@ -55,6 +58,8 @@ __all__ = [
     "BenchmarkReport",
     "Box3D",
     "CanonicalShapeTrace",
+    "CuboidFitTrace",
+    "EnvelopeFittingSettings",
     "EvaluationReport",
     "EvidenceSelectionSettings",
     "EvidenceState",
@@ -82,8 +87,10 @@ __all__ = [
     "TrackObservation",
     "TrackRefiner",
     "build_review_bundle",
+    "build_review_suite",
     "evaluate_case",
     "evaluate_suite",
+    "fit_alternating_envelope",
     "read_geometric_trace",
     "read_outcome",
     "register_canonical_shape",

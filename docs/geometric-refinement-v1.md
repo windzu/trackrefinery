@@ -1,6 +1,7 @@
 # Deterministic Geometric Refinement V1
 
-Status: accepted algorithm design; evidence, registration, and trace stages implemented
+Status: accepted algorithm design; evidence, registration, visible-envelope,
+and alternating trace stages implemented
 
 ## Decision
 
@@ -150,10 +151,9 @@ Interior target points support registration and containment but do not pull a
 cuboid face inward. Only observable outer-envelope evidence may tighten a
 face.
 
-### Implemented registration stage
+### Implemented registration and visible-envelope stages
 
-The current stage-three implementation keeps registration separate from the
-future size estimate:
+The current implementation keeps registration separate from the size estimate:
 
 - points begin in each coarse-box-local frame, while coarse object poses are
   composed through exact `T_world_from_annotation` transforms before candidate
@@ -167,11 +167,19 @@ future size estimate:
   preventing self-correspondence from falsely reporting a zero residual;
 - canonical points are retained only when another configured number of frames
   supports them within the configured spatial radius.
+- cross-frame persistence and the current candidate envelope deterministically
+  reassign target, ambiguous, and background evidence between rounds;
+- supported outer tails estimate horizontal faces, the robust ground plane
+  anchors the lower face, and the supported upper tail estimates height;
+- registration, evidence reassignment, and envelope fitting alternate to fixed
+  convergence and iteration limits without category-conditioned priors.
 
-The resulting per-frame poses and canonical points are development candidates
-inside the trace. They are not copied into `RefinementSuccess`. Sparse or
-degenerate frames carry explicit registration reason codes, and the entire
-backend remains gated until envelope fitting and all success checks exist.
+The resulting per-frame poses, canonical points, and one canonical cuboid are
+development candidates inside the trace. They are not copied into
+`RefinementSuccess`. Sparse or degenerate frames carry explicit reason codes,
+and the entire backend remains gated until hypothesis selection and all
+observability and stability checks exist. Face support counts are stored in
+`(x_min, x_max, y_min, y_max, z_min, z_max)` order.
 
 SciPy spatial indexing is loaded only by this stage through the optional
 `geometric` package extra. The public contracts and dataset tools retain their
@@ -326,7 +334,8 @@ tolerances and require no geometry correction in blinded X-Points review.
 3. **Implemented:** add deterministic robust per-frame registration and
    cross-frame-supported canonical shape aggregation. Candidate poses remain
    trace-only.
-4. Implement visible-envelope cuboid fitting and the alternating loop.
+4. **Implemented:** add visible-envelope cuboid fitting and the alternating
+   evidence/registration/envelope loop. Candidate dimensions remain trace-only.
 5. Add multi-hypothesis selection, observability, and dropout stability gates.
 6. Calibrate on reviewed development/calibration tracks, freeze thresholds,
    and run blind test and X-Points review.
