@@ -100,6 +100,7 @@ review/<run_id>/<case_id>/
   result.json
   metrics.json                 # when a gold target is available
   aggregate.npz                # selected points in candidate/refined frame
+  gold_aggregate.npz           # same points aligned by gold poses; review only
   canonical_shape.npz          # registration-stage persistent evidence
   preview.html                 # self-contained or locally served viewer
   thumbnails/
@@ -113,6 +114,12 @@ The aggregate point cloud is required because it directly exposes smearing,
 incorrect alignment, missing surfaces, ground contamination, and neighboring
 objects. Points should be colorized by frame/time, with coarse, refined, and
 gold boxes independently toggleable.
+
+When a separate reviewed target is available, the viewer must show both the
+algorithm-aligned aggregate and an annotation-pose-aligned aggregate. They use
+the same displayed point indices and differ only in the alignment pose, so the
+comparison does not hide errors by changing the crop. Target poses remain in
+the evaluation/review path and are never passed to the backend.
 
 A fixed aggregate alone is insufficient: pose errors can cancel or smear in
 aggregation and hide which frame is wrong. The web viewer therefore provides:
@@ -151,3 +158,10 @@ cross-frame support, and the trace-only visible-envelope size candidate. Every
 bundle names its data source so a generated fixture cannot be mistaken for a
 real Clip. Candidate geometry is visibly marked as not released until the
 success gate exists.
+
+Complete regression runs additionally contain `suite.json` and `index.html`.
+The index exposes every case as a top-level tab, while each case has separate
+tabs for algorithm aggregate, annotation aggregate, canonical shape, current
+evidence, per-frame results, metrics, and diagnostics. A failed or
+insufficient-evidence case remains visible; suite generation must not select
+only favorable examples.

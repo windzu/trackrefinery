@@ -46,7 +46,7 @@ from trackrefinery.geometric import (
     write_geometric_trace,
 )
 from trackrefinery.refiner import TrackRefiner, validate_outcome
-from trackrefinery.review import build_review_bundle
+from trackrefinery.review import build_review_bundle, build_review_suite
 from trackrefinery.serde import read_outcome, write_outcome
 from trackrefinery.targets import GoldFramePose, GoldTarget, TargetDataset
 
@@ -87,6 +87,7 @@ __all__ = [
     "TrackObservation",
     "TrackRefiner",
     "build_review_bundle",
+    "build_review_suite",
     "evaluate_case",
     "evaluate_suite",
     "fit_alternating_envelope",

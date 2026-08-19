@@ -68,6 +68,12 @@ build_review_bundle(
 )
 ```
 
+Multiple case bundles can be placed under one directory and exposed through a
+single tabbed review page with `build_review_suite()`. When a physically
+separate gold target is supplied, each case also contains an annotation-pose-
+aligned aggregate for review-only comparison; it is never exposed to the
+refinement backend.
+
 The base package depends only on NumPy. Registration uses SciPy through the
 `geometric` extra, while review rendering uses the `review` extra. Importing
 the core contracts does not require SciPy, Plotly, or Matplotlib.

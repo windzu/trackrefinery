@@ -15,7 +15,11 @@ from trackrefinery.evaluation import (
 )
 from trackrefinery.geometric import read_geometric_trace
 from trackrefinery.refiner import validate_outcome
-from trackrefinery.review import build_review_bundle, serve_review_bundle
+from trackrefinery.review import (
+    build_review_bundle,
+    build_review_suite,
+    serve_review_bundle,
+)
 from trackrefinery.serde import read_outcome
 from trackrefinery.targets import TargetDataset
 
@@ -147,6 +151,17 @@ def review_main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def build_review_suite_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Build a tabbed review suite index.")
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--bundle", action="append", required=True)
+    parser.add_argument("--title", default="TrackRefinery review suite")
+    args = parser.parse_args(argv)
+    output = build_review_suite(args.output, args.bundle, title=args.title)
+    print(f"wrote review suite to {output}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="trackrefinery")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -174,6 +189,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     build_parser.add_argument("--output", required=True)
     build_parser.add_argument("--crop-scale", type=float, default=1.8)
     build_parser.add_argument("--max-points-per-frame", type=int, default=8_000)
+    suite_parser = subparsers.add_parser("build-review-suite")
+    suite_parser.add_argument("--output", required=True)
+    suite_parser.add_argument("--bundle", action="append", required=True)
+    suite_parser.add_argument("--title", default="TrackRefinery review suite")
     serve_parser = subparsers.add_parser("review")
     serve_parser.add_argument("bundle")
     serve_parser.add_argument("--host", default="127.0.0.1")
@@ -187,6 +206,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "evaluate": evaluate_main,
         "evaluate-suite": evaluate_suite_main,
         "build-review": build_review_main,
+        "build-review-suite": build_review_suite_main,
         "review": review_main,
     }[args.command](forwarded)
 
@@ -232,6 +252,9 @@ def _forwarded_arguments(args: argparse.Namespace) -> list[str]:
         flag = "--open" if name == "open_browser" else "--" + name.replace("_", "-")
         if value is True:
             forwarded.append(flag)
+        elif isinstance(value, list):
+            for item in value:
+                forwarded.extend((flag, str(item)))
         else:
             forwarded.extend((flag, str(value)))
     return forwarded

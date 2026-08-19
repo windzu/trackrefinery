@@ -129,7 +129,7 @@ python -m pip install 'trackrefinery[review]'
 ```
 
 ```python
-from trackrefinery import build_review_bundle
+from trackrefinery import build_review_bundle, build_review_suite
 
 build_review_bundle(
     case,
@@ -138,6 +138,15 @@ build_review_bundle(
     target=gold,
     trace=run.trace,
     data_source="synthetic-v1",  # or the real dataset/Clip identifier
+)
+
+build_review_suite(
+    "review/run-001",
+    [
+        "review/run-001/cases/static_complete",
+        "review/run-001/cases/moving_complete",
+    ],
+    title="Regression run 001",
 )
 ```
 
@@ -149,6 +158,11 @@ candidate registration poses and the visible-envelope cuboid are explicitly
 labeled and never presented as a refined result. The declared data source is
 shown on the page to distinguish generated fixtures from real Clips. Serve it
 with `trackrefinery-review review/run-001/case --open`.
+
+The suite index presents all case bundles as top-level tabs. A case with a
+separate target includes an `Annotation aggregate` tab made from the same
+display points aligned by gold poses. This is a review-only artifact and does
+not change the source-only inference contract.
 
 The CLI accepts the same sidecar through
 `trackrefinery-build-review --trace traces/case/evidence_trace.json ...`.
