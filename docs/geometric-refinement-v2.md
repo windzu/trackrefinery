@@ -1,7 +1,7 @@
 # Component-Consensus Geometric Refinement V2
 
-Status: accepted replacement design; component extraction and provisional
-frame-role trace implemented
+Status: accepted replacement design; component extraction, frame roles, and
+provisional anchored geometry-frame aggregation implemented
 
 ## Decision
 
@@ -182,7 +182,7 @@ advance to canonical aggregation during this MVP.
 
 This is a development-scope gate, not a claim that 999 points are physically
 insufficient. The thresholds are versioned in
-`trackrefinery-component-consensus-settings-v2`; sparse-track support will be a
+`trackrefinery-component-consensus-settings-v3`; sparse-track support will be a
 separate calibration and implementation task after dense-track refinement is
 usable.
 
@@ -212,6 +212,36 @@ frames cannot deform the canonical shape and are downgraded to `pose_only` or
 This is not a claim that ICP is the algorithm. Nearest-neighbor registration is
 an interchangeable local alignment primitive inside a track-anchored process.
 Its residual is diagnostic, never the definition of success.
+
+### Implemented Stage 3 profile
+
+The first implementation uses a deterministic trimmed point-to-point local
+primitive over 8 cm voxel representatives. It optimizes only horizontal
+translation and yaw; it never changes vertical placement or any accepted
+frame. The anchor is the temporally most central frame among frames within 80%
+of the best measured component quality. Remaining geometry frames are attempted
+in deterministic quality order against the fixed aggregate accumulated so far.
+
+Every proposed correction is bounded to 0.25 m and 4 degrees. A material
+correction must improve both absolute and relative trimmed RMSE, must not widen
+any 1--99% aggregate axis by more than 2 cm, and must not reduce multi-frame
+voxel concentration by more than 0.005. A frame whose baseline already has
+sufficient overlap may retain its exact coarse pose when the proposed movement
+is unnecessary or fails those non-regression checks. Insufficiently overlapping
+frames are rejected rather than allowed to deform the aggregate.
+
+After sequential aggregation, a track-level check repeats the same-axis and
+voxel-concentration comparison and verifies timestamp-aware correction velocity,
+acceleration, and yaw-rate bounds using the exact annotation-frame-to-world
+poses. A track-level regression discards all proposed movement and retains the
+coarse alignment. These thresholds are versioned development calibration, not
+physical claims or public caller parameters.
+
+The Stage 3 output is still a provisional trace and always returns
+`insufficient_evidence`: no canonical dimensions have been fitted and no
+annotation result is released. Review A/B views use only identical selected
+component points from geometry frames; ROI background and ground cannot make a
+registration candidate look better or worse.
 
 ## Stage 4: one canonical size
 
@@ -332,14 +362,15 @@ dimensions, and the exact rejection reason.
 
 1. **Implemented:** preserve V1 as a named legacy trace baseline and prevent it
    from being mistaken for the current backend.
-2. **Partly implemented:** add V2 trace contracts. Component decisions and
-   frame roles are present; alignment, sharpness, and dimension-stability fields
-   arrive with their owning stages.
+2. **Partly implemented:** add V2 trace contracts. Component decisions, frame
+   roles, anchored alignment decisions, and aggregate sharpness are present;
+   dimension-stability fields arrive with their owning stage.
 3. **Implemented, pending real-catalog review:** deterministic ground removal,
    3D component selection, resolution-stability measurement, and conservative
    merged-component rejection.
-4. Implement frame-role classification and anchored geometry-frame
-   aggregation, retaining baseline poses when a candidate alignment regresses.
+4. **Implemented, pending five-instance real review:** frame-role
+   classification and anchored geometry-frame aggregation, retaining baseline
+   poses when a candidate alignment regresses.
 5. Implement canonical size fitting and leave-one-frame-out stability.
 6. Implement fixed-size per-frame pose refinement and bounded trajectory-only
    interpolation.

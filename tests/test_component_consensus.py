@@ -34,20 +34,26 @@ def _synthetic_dense_settings() -> ComponentConsensusSettings:
     )
 
 
-def test_v2_selects_clean_components_without_publishing_geometry() -> None:
-    run = ComponentConsensusRefiner(_synthetic_dense_settings()).refine_with_trace(
-        _case("static_complete")
-    )
+def test_v2_aggregates_clean_components_without_publishing_geometry() -> None:
+    settings = _synthetic_dense_settings()
+    case = _case("static_complete")
+    run = ComponentConsensusRefiner(settings).refine_with_trace(case)
 
     assert run.outcome.status == "insufficient_evidence"
     assert run.outcome.reasons == ("algorithm_stage_incomplete",)
-    assert run.trace.stage == "component_selection_v2"
+    assert run.trace.stage == "anchored_component_aggregation_v2"
+    assert run.trace.anchored_aggregation is not None
+    assert run.trace.anchored_aggregation.status == "candidate"
+    assert run.trace.canonical_shape is not None
+    assert run.outcome.diagnostics["anchored_aggregation_supported"] is True
     assert run.outcome.diagnostics["frame_role_counts"] == {
         "geometry": 5,
         "pose_only": 0,
         "trajectory_only": 0,
     }
-    for frame in run.trace.frames:
+    for observation, frame in zip(
+        case.track.observations, run.trace.frames, strict=True
+    ):
         component = frame.component
         assert component is not None
         assert component.status == "selected"
@@ -56,6 +62,35 @@ def test_v2_selects_clean_components_without_publishing_geometry() -> None:
         assert 0 < component.selected_point_count < len(frame.roi_point_indices)
         assert component.resolution_stability_iou is not None
         assert component.resolution_stability_iou >= 0.65
+        assert frame.registration is not None
+        assert frame.registration.status in {"registered", "retained_coarse"}
+        correction = frame.registration.canonical_from_coarse
+        assert correction is not None
+        assert correction.translation_xyz[2] == 0.0
+        assert correction.orientation_xyzw[:2] == (0.0, 0.0)
+        assert (
+            frame.registration.translation_correction_m
+            <= settings.aggregation_maximum_xy_correction_m
+        )
+        assert (
+            frame.registration.yaw_correction_deg
+            <= settings.aggregation_maximum_yaw_correction_deg
+        )
+        if frame.registration.status == "retained_coarse":
+            assert (
+                frame.registration.candidate_pose_annotation
+                == observation.coarse_box.pose
+            )
+
+    aggregation = run.trace.anchored_aggregation
+    assert aggregation.candidate_sharpness is not None
+    assert aggregation.baseline_sharpness is not None
+    for before, after in zip(
+        aggregation.baseline_sharpness.robust_spread_xyz_m,
+        aggregation.candidate_sharpness.robust_spread_xyz_m,
+        strict=True,
+    ):
+        assert after <= before + settings.aggregation_maximum_axis_spread_regression_m
 
 
 def test_v2_default_scope_rejects_point_sparse_track_geometry() -> None:
@@ -165,7 +200,9 @@ def test_v2_component_trace_is_deterministic_and_portable(tmp_path: Path) -> Non
     assert restored.to_summary_dict() == first.trace.to_summary_dict()
     for expected, actual in zip(first.trace.frames, restored.frames, strict=True):
         assert actual.component == expected.component
+        assert actual.registration == expected.registration
         np.testing.assert_array_equal(actual.point_states, expected.point_states)
+    assert restored.anchored_aggregation == first.trace.anchored_aggregation
 
 
 def test_v2_settings_reject_inverted_role_thresholds() -> None:
@@ -180,7 +217,7 @@ def test_v2_settings_reject_inverted_role_thresholds() -> None:
         ComponentConsensusSettings(geometry_reference_quantile=0.0)
 
 
-def test_v2_review_names_component_selection_without_claiming_registration(
+def test_v2_review_shows_anchored_same_point_alignment_candidate(
     tmp_path: Path,
 ) -> None:
     case = _case("static_complete")
@@ -196,7 +233,7 @@ def test_v2_review_names_component_selection_without_claiming_registration(
     )
 
     manifest = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
-    assert manifest["algorithm_stage"] == "component_selection_v2"
+    assert manifest["algorithm_stage"] == "anchored_component_aggregation_v2"
     assert manifest["frame_role_counts"] == {
         "geometry": 5,
         "pose_only": 0,
@@ -204,11 +241,16 @@ def test_v2_review_names_component_selection_without_claiming_registration(
     }
     assert manifest["dense_track_supported"] is True
     assert manifest["selected_component_point_count"] > 0
-    assert manifest["has_registration_trace"] is False
+    assert manifest["has_registration_trace"] is True
+    assert manifest["has_input_track_comparison"] is True
+    assert manifest["anchored_aggregation"]["status"] == "candidate"
     html = (bundle / "preview.html").read_text(encoding="utf-8")
     assert "V2 component selection" in html
     assert "selected object component" in html
-    assert "no registration performed" in html
+    assert "Alignment A/B" in html
+    assert "anchored V2 component aggregate" in html
     assert "Frame roles" in html
+    assert (bundle / "thumbnails" / "alignment_comparison_top.png").is_file()
+    assert (bundle / "thumbnails" / "alignment_comparison_side.png").is_file()
     assert (bundle / "thumbnails" / "aggregate_evidence_top.png").is_file()
     assert (bundle / "thumbnails" / "aggregate_evidence_side.png").is_file()

@@ -25,12 +25,14 @@ The accepted algorithm direction is
 extract one object component per usable frame, aggregate only reliable frames,
 fit one canonical size, and refine every frame pose with that size fixed. It
 does not use learned priors, sensor rays, free-space, or occupancy modeling.
-The `ComponentConsensusRefiner` now implements its first gated stage: bounded
-ROI and ground handling, deterministic 3D component extraction, cross-resolution
-selection stability, conservative merged-component rejection, and provisional
-`geometry` / `pose_only` / `trajectory_only` frame roles. It returns
-`insufficient_evidence` until aggregation, canonical size, fixed-size pose
-refinement, and acceptance gates are implemented.
+The `ComponentConsensusRefiner` now implements its first three gated stages:
+bounded ROI and ground handling, deterministic 3D component extraction,
+cross-resolution selection stability, conservative merged-component rejection,
+`geometry` / `pose_only` / `trajectory_only` frame roles, and anchored
+geometry-frame aggregation. Corrections are bounded and individually
+rejectable; a regressing proposal retains the exact coarse pose. It returns
+`insufficient_evidence` until canonical size, fixed-size pose refinement, and
+final acceptance gates are implemented.
 
 The current default is a dense-first MVP profile. Only same-track frames with
 at least 1,000 selected component points and strong relative spatial support
@@ -85,16 +87,22 @@ build_review_bundle(
 )
 ```
 
-The V2 component stage is independently inspectable without claiming a
-refinement result:
+The V2 component and anchored-aggregation stages are independently inspectable
+without claiming a refinement result:
 
 ```python
 from trackrefinery import ComponentConsensusRefiner
 
 run = ComponentConsensusRefiner().refine_with_trace(case)
-assert run.trace.stage == "component_selection_v2"
+assert run.trace.stage == "anchored_component_aggregation_v2"
+print(run.trace.anchored_aggregation.to_dict())
 for frame in run.trace.frames:
-    print(frame.frame_id, frame.component.status, frame.component.frame_role)
+    print(
+        frame.frame_id,
+        frame.component.status,
+        frame.component.frame_role,
+        frame.registration,
+    )
 ```
 
 Multiple case bundles can be placed under one directory and exposed through a
