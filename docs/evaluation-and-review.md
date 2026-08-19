@@ -86,11 +86,14 @@ The benchmark is a development diagnostic, not ground-truth evaluation:
 
 1. run component selection on the frozen real model track;
 2. keep the selected point indices, frame roles, and chosen anchor fixed;
-3. leave the anchor unchanged and inject deterministic, smooth local XY/yaw
-   drift into the other geometry-frame coarse poses;
-4. run anchored aggregation without exposing the original poses to it;
-5. compare the returned candidate poses with the frozen original poses only in
-   the evaluator.
+3. run the candidate algorithm once on the unperturbed component trace to
+   establish its natural-input output;
+4. leave the anchor unchanged and inject deterministic, smooth local XY/yaw
+   drift around that natural output for the other geometry frames;
+5. run the candidate again on the perturbed case without exposing the
+   unperturbed output as a separate input;
+6. compare the perturbed output both with the frozen original model poses and
+   with the algorithm's own unperturbed output, only in the evaluator.
 
 The default profiles reach 5/10/15 cm translation and 0.5/1/2 degrees yaw.
 Perturbations vary smoothly with exact frame timestamps on both sides of the
@@ -98,24 +101,40 @@ anchor so this test measures registration recovery rather than deliberately
 violating the trajectory guard. Pose-only and trajectory-only frames are not
 perturbed because Stage 3 does not consume them.
 
-Every run reports per-frame input and output pose residuals, RMS residuals,
-recovery fractions, improved-frame fractions, and registration disposition.
+Every run reports two deliberately separate metric families. `proxy_*`
+residuals retain the absolute comparison with the frozen original model track;
+they reveal how far the candidate moves from that useful but non-gold proxy.
+`equivariant_*` residuals compare the perturbed run with the same algorithm's
+unperturbed output; they isolate whether the known injected drift was removed
+without charging the recovery metric for a repeatable natural-input geometric
+correction. Per-frame metrics, RMS reductions, improved-frame fractions, and
+registration dispositions are reported for both families.
+
+Injecting around the natural output also keeps the declared perturbation inside
+the production correction envelope. Injecting on top of the original model
+pose can combine an existing natural correction with the artificial error and
+silently ask a bounded solver to exceed its supported correction. Expanding a
+production safety bound merely to make the diagnostic solvable is forbidden.
 Its review bundle uses the exact same selected points and frame colors in three
 shared-axis views:
 
 ```text
-REFERENCE  frozen original model-track alignment; proxy only, not gold
+PROXY      frozen original model-track alignment; useful but not gold
+REFERENCE candidate algorithm output on the unperturbed selected components
 INPUT      deterministic perturbed alignment seen by Stage 3
 OUTPUT     anchored-aggregation candidate, or unchanged input when rejected
 ```
 
-The reference is intentionally named a proxy. A low residual proves recovery
-of a known injected error around that model track; it does not prove that the
-model track is physically correct. Anchor error and a common bias applied to
-every frame are unobservable in the current anchored gauge and remain explicit
-non-goals of this benchmark. End-to-end crop robustness is evaluated
-separately by perturbing before component selection; it must not be conflated
-with this isolated Stage 3 test.
+Neither family is sufficient alone. A low equivariant residual proves recovery
+of a known injected error but does not prove that the algorithm's natural
+output is physically correct. A low proxy residual can merely mean the
+algorithm retained the model input. Promotion therefore requires equivariant
+recovery together with natural-input same-point non-regression and visual
+review; the proxy metrics remain visible as a drift warning. Anchor error and
+a common bias applied to every frame are unobservable in the current anchored
+gauge and remain explicit non-goals of this benchmark. End-to-end crop
+robustness is evaluated separately by perturbing before component selection;
+it must not be conflated with this isolated Stage 3 test.
 
 ## Human acceptance
 

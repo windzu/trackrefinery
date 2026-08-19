@@ -128,6 +128,51 @@ and failed cases visible with identical points and axes. Stage 4 sizing must
 remain blocked while Stage 3 registration is redesigned and rerun against this
 frozen suite.
 
+### Stage 3 V3 pose-graph result
+
+The first V3 normal-aware pose-graph run uses the same five component traces
+and adds an explicit unperturbed-algorithm reference. Controlled drift is
+injected around that reference so the equivariant metric isolates recovery of
+the declared error; absolute error to the frozen model-track proxy remains in
+every report and view.
+
+Four tracks have redundant observable graphs. At the strong profile their
+equivariant translation recovery is 98.8%, 96.3%, 92.2%, and 93.6%, leaving
+1.2--7.6 mm RMS. Yaw recovery is 98.7%, 97.1%, 98.1%, and 99.4%, leaving
+0.010--0.037 degrees RMS. All mild and medium runs for these tracks have
+positive recovery; one mild translation run is 78.4%, while the strong-profile
+promotion minimum is exceeded by all four.
+
+The six-geometry-frame track is not counted as a success. Its right-hand frame
+cluster is internally consistent but connects to the anchor cluster through
+one partial-overlap bridge. That bridge cannot disambiguate the cluster yaw,
+and a nine-second observation gap makes both local minima trajectory-plausible.
+V3 returns `weak_partial_overlap_bridge`, registers no frame, and the controlled
+suite reports all five non-anchor frames unavailable. This is the desired
+failure mode: four releasable candidates and one explicit rejection, not an
+average that hides an incorrect pose.
+
+The generated development suite is under
+`.data/real-clip-review/site/recovery-v3/`. It contains PROXY, unperturbed
+REFERENCE, perturbed INPUT, and OUTPUT views with identical points, colors, and
+axes. The assets remain private development data and are not committed.
+
+The combined suite contains all 45 case/profile/variant bundles. Strong-profile
+equivariant recovery percentages are:
+
+| Track suffix | Sequential XY / yaw | P2P graph XY / yaw | Normal graph XY / yaw |
+|---|---:|---:|---:|
+| `83bdbc95` | 16.2 / 5.0 | 46.0 / 49.5 | 98.8 / 98.7 |
+| `8a60c8b6` | 34.3 / 81.7 | 63.8 / 49.2 | 96.3 / 97.1 |
+| `fe8dfe0c` | 37.7 / 73.4 | 51.9 / 70.6 | 92.2 / 98.1 |
+| `2a9844b6` | 36.4 / 34.9 | 53.9 / 44.3 | 93.6 / 99.4 |
+| `33acbf1b` | 46.4 / 20.7 | unavailable | unavailable |
+
+The rejected row is not a regression hidden by the table: both graph variants
+refuse to infer a cluster yaw through a weak bridge, while the sequential
+baseline still emits a low-recovery candidate. This is the confidence behavior
+required for automatic-label release.
+
 ## Gold-target preparation
 
 Existing annotation is a candidate target, not automatically gold. Selected

@@ -98,7 +98,7 @@ def test_controlled_recovery_freezes_components_and_hides_reference_poses() -> N
     )
 
 
-def test_controlled_recovery_review_has_three_same_point_views(
+def test_controlled_recovery_review_has_four_same_point_views(
     tmp_path: Path,
 ) -> None:
     case = _case()
@@ -123,6 +123,7 @@ def test_controlled_recovery_review_has_three_same_point_views(
     assert manifest["reference_semantics"] == "frozen_model_track_proxy_not_gold"
     with np.load(bundle / "aggregates.npz", allow_pickle=False) as archive:
         point_count = len(archive["reference_points_xyz"])
+        assert len(archive["proxy_points_xyz"]) == point_count
         assert len(archive["input_points_xyz"]) == point_count
         assert len(archive["output_points_xyz"]) == point_count
         assert len(archive["frame_index"]) == point_count
@@ -130,7 +131,8 @@ def test_controlled_recovery_review_has_three_same_point_views(
     assert "REFERENCE" in html
     assert "INPUT" in html
     assert "OUTPUT" in html
-    assert "proxy, not reviewed gold" in html
+    assert "PROXY is the frozen model track" in html
+    assert "Equivariant translation RMS" in html
     assert (bundle / "thumbnails" / "comparison_top.png").is_file()
     assert (bundle / "thumbnails" / "comparison_side.png").is_file()
     suite_manifest = json.loads(
@@ -141,7 +143,7 @@ def test_controlled_recovery_review_has_three_same_point_views(
     suite_html = (suite / "index.html").read_text(encoding="utf-8")
     assert 'class="case-tab active"' in suite_html
     assert "Known-error Stage 3 diagnostic" in suite_html
-    assert "its poses are not an algorithm input" in suite_html
+    assert "Neither is an input to the" in suite_html
 
 
 def test_controlled_recovery_cli_builds_selected_profile(tmp_path: Path) -> None:
@@ -159,6 +161,8 @@ def test_controlled_recovery_cli_builds_selected_profile(tmp_path: Path) -> None
             "static_complete",
             "--profile",
             "mild",
+            "--algorithm-variant",
+            "normal_aware_pose_graph",
             "--settings",
             str(settings_path),
             "--output",
@@ -176,3 +180,6 @@ def test_controlled_recovery_cli_builds_selected_profile(tmp_path: Path) -> None
     assert [row["profile"]["name"] for row in manifest["cases"][0]["profiles"]] == [
         "mild"
     ]
+    assert manifest["cases"][0]["profiles"][0]["algorithm_variant"] == (
+        "normal_aware_pose_graph"
+    )

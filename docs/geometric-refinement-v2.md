@@ -188,6 +188,15 @@ usable.
 
 ## Stage 3: anchored component aggregation
 
+The sequential V2.1 profile below is now the frozen non-regression baseline.
+Controlled recovery showed that it does not reliably recover yaw, so it must
+not be tuned further or used as the foundation for Stage 4. The accepted next
+experiment is the observable pairwise-registration and global pose-graph
+design in [Stage 3 V3](stage3-pose-graph-v3.md).
+
+The V3 sidecar owns a resolution-aware aggregate guard. It does not alter the
+frozen V2.1 guard while the experiment is under evaluation.
+
 V2 aggregates only selected components from geometry frames. It never aligns
 raw ROI points.
 
@@ -368,14 +377,17 @@ dimensions, and the exact rejection reason.
 3. **Implemented, pending real-catalog review:** deterministic ground removal,
    3D component selection, resolution-stability measurement, and conservative
    merged-component rejection.
-4. **Implemented, pending recovery validation:** frame-role classification and
+4. **Implemented, failed recovery promotion gate:** frame-role classification and
    anchored geometry-frame aggregation, retaining baseline poses when a
    candidate alignment regresses. Five dense real tracks establish
-   non-regression, but their naturally small input errors do not establish
-   correction capability.
-5. Validate Stage 3 against deterministic 5/10/15 cm and 0.5/1/2 degree
-   perturbations of frozen real selected components. Do not begin sizing until
-   the reference/input/output artifacts show useful known-error recovery.
+   non-regression, but controlled recovery is inconsistent and includes yaw
+   regression.
+5. **Experimental implementation, partial promotion:** observable pairwise
+   registration, partial information, and one anchored global pose-graph solve
+   are implemented behind a separate API and sidecar. Four redundant dense
+   graphs pass the strong controlled gate; one six-frame graph is explicitly
+   rejected for dependence on a weak partial-overlap bridge. V2.1 remains the
+   default until tests, the full ablation record, and review are complete.
 6. Implement canonical size fitting and leave-one-frame-out stability.
 7. Implement fixed-size per-frame pose refinement and bounded trajectory-only
    interpolation.

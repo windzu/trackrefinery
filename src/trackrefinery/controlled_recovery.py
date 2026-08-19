@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from math import cos, degrees, isfinite, radians, sin, sqrt
 from pathlib import Path
@@ -27,7 +28,12 @@ from trackrefinery.geometry import (
     yaw_from_quaternion,
 )
 
-CONTROLLED_RECOVERY_CONTRACT = "trackrefinery-controlled-recovery-v1"
+CONTROLLED_RECOVERY_CONTRACT = "trackrefinery-controlled-recovery-v2"
+
+AggregationBackend = Callable[
+    [RefinementCase, GeometricRefinementTrace, ComponentConsensusSettings],
+    GeometricRefinementTrace,
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +105,10 @@ class ControlledFrameRecovery:
     output_yaw_error_deg: float
     translation_recovery_fraction: float | None
     yaw_recovery_fraction: float | None
+    equivariant_output_translation_error_m: float
+    equivariant_output_yaw_error_deg: float
+    equivariant_translation_recovery_fraction: float | None
+    equivariant_yaw_recovery_fraction: float | None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -111,6 +121,16 @@ class ControlledFrameRecovery:
             "output_yaw_error_deg": self.output_yaw_error_deg,
             "translation_recovery_fraction": self.translation_recovery_fraction,
             "yaw_recovery_fraction": self.yaw_recovery_fraction,
+            "equivariant_output_translation_error_m": (
+                self.equivariant_output_translation_error_m
+            ),
+            "equivariant_output_yaw_error_deg": (self.equivariant_output_yaw_error_deg),
+            "equivariant_translation_recovery_fraction": (
+                self.equivariant_translation_recovery_fraction
+            ),
+            "equivariant_yaw_recovery_fraction": (
+                self.equivariant_yaw_recovery_fraction
+            ),
         }
 
 
@@ -118,6 +138,7 @@ class ControlledFrameRecovery:
 class ControlledRecoveryReport:
     case_id: str
     track_id: str
+    algorithm_variant: str
     profile: ControlledPerturbationProfile
     anchor_frame_id: str
     geometry_frame_count: int
@@ -133,14 +154,24 @@ class ControlledRecoveryReport:
     yaw_rms_reduction_fraction: float
     improved_translation_frame_fraction: float
     improved_yaw_frame_fraction: float
+    equivariant_output_translation_rms_m: float
+    equivariant_output_yaw_rms_deg: float
+    equivariant_translation_rms_reduction_fraction: float
+    equivariant_yaw_rms_reduction_fraction: float
+    equivariant_improved_translation_frame_fraction: float
+    equivariant_improved_yaw_frame_fraction: float
     frames: tuple[ControlledFrameRecovery, ...]
 
     def to_dict(self) -> dict[str, object]:
         return {
             "contract_version": CONTROLLED_RECOVERY_CONTRACT,
             "reference_semantics": "frozen_model_track_proxy_not_gold",
+            "equivariant_reference_semantics": (
+                "same_algorithm_unperturbed_output_not_gold"
+            ),
             "case_id": self.case_id,
             "track_id": self.track_id,
+            "algorithm_variant": self.algorithm_variant,
             "profile": self.profile.to_dict(),
             "anchor_frame_id": self.anchor_frame_id,
             "geometry_frame_count": self.geometry_frame_count,
@@ -160,6 +191,22 @@ class ControlledRecoveryReport:
                 self.improved_translation_frame_fraction
             ),
             "improved_yaw_frame_fraction": self.improved_yaw_frame_fraction,
+            "equivariant_output_translation_rms_m": (
+                self.equivariant_output_translation_rms_m
+            ),
+            "equivariant_output_yaw_rms_deg": self.equivariant_output_yaw_rms_deg,
+            "equivariant_translation_rms_reduction_fraction": (
+                self.equivariant_translation_rms_reduction_fraction
+            ),
+            "equivariant_yaw_rms_reduction_fraction": (
+                self.equivariant_yaw_rms_reduction_fraction
+            ),
+            "equivariant_improved_translation_frame_fraction": (
+                self.equivariant_improved_translation_frame_fraction
+            ),
+            "equivariant_improved_yaw_frame_fraction": (
+                self.equivariant_improved_yaw_frame_fraction
+            ),
             "frames": [frame.to_dict() for frame in self.frames],
         }
 
@@ -180,6 +227,7 @@ class ControlledRecoveryRun:
     reference_case: RefinementCase
     perturbed_case: RefinementCase
     component_trace: GeometricRefinementTrace
+    reference_output_trace: GeometricRefinementTrace
     output_trace: GeometricRefinementTrace
     perturbations: tuple[ControlledFramePerturbation, ...]
     report: ControlledRecoveryReport
@@ -191,6 +239,8 @@ def run_controlled_recovery(
     profile: ControlledPerturbationProfile | None = None,
     settings: ComponentConsensusSettings | None = None,
     component_trace: GeometricRefinementTrace | None = None,
+    aggregation_backend: AggregationBackend | None = None,
+    algorithm_variant: str = "sequential_v2_1",
 ) -> ControlledRecoveryRun:
     """Measure Stage 3 recovery around a frozen model-track proxy reference.
 
@@ -201,44 +251,43 @@ def run_controlled_recovery(
 
     resolved_profile = profile or DEFAULT_CONTROLLED_PERTURBATION_PROFILES[-1]
     resolved_settings = settings or ComponentConsensusSettings()
+    if not isinstance(algorithm_variant, str) or not algorithm_variant.strip():
+        raise ValueError("algorithm_variant must be a non-empty string")
+    variant = algorithm_variant.strip()
     supplied = component_trace or select_object_components(case, resolved_settings)
     validate_geometric_trace(case, supplied)
     if supplied.config_sha256 != resolved_settings.sha256:
         raise ValueError("component trace and recovery settings do not match")
     selected = _component_only_trace(supplied)
-    baseline = (
-        supplied
-        if supplied.anchored_aggregation is not None
-        else aggregate_geometry_components(case, selected, resolved_settings)
-    )
-    aggregation = baseline.anchored_aggregation
+    backend = aggregation_backend or aggregate_geometry_components
+    reference_output_trace = backend(case, selected, resolved_settings)
+    aggregation = reference_output_trace.anchored_aggregation
     if aggregation is None or aggregation.anchor_frame_id is None:
         raise ValueError("controlled recovery requires an anchored geometry track")
-    if aggregation.status != "candidate":
-        raise ValueError("controlled recovery requires a supported Stage 3 candidate")
-
     perturbations = _build_perturbations(
         case,
         selected,
         aggregation.anchor_frame_id,
         resolved_profile,
+        reference_output_trace,
     )
     perturbed_case = _perturb_case(case, perturbations)
-    output_trace = aggregate_geometry_components(
-        perturbed_case, selected, resolved_settings
-    )
+    output_trace = backend(perturbed_case, selected, resolved_settings)
     report = _evaluate_recovery(
         case,
         perturbed_case,
+        reference_output_trace,
         output_trace,
         perturbations,
         resolved_profile,
         aggregation.anchor_frame_id,
+        variant,
     )
     return ControlledRecoveryRun(
         reference_case=case,
         perturbed_case=perturbed_case,
         component_trace=selected,
+        reference_output_trace=reference_output_trace,
         output_trace=output_trace,
         perturbations=perturbations,
         report=report,
@@ -265,6 +314,7 @@ def _build_perturbations(
     trace: GeometricRefinementTrace,
     anchor_frame_id: str,
     profile: ControlledPerturbationProfile,
+    reference_output_trace: GeometricRefinementTrace,
 ) -> tuple[ControlledFramePerturbation, ...]:
     geometry_indices = [
         index
@@ -296,7 +346,14 @@ def _build_perturbations(
         )
         yaw_deg = profile.maximum_yaw_deg * phase
         frame = case.frames[index]
-        reference = case.track.observations[index].coarse_box.pose
+        input_reference = case.track.observations[index].coarse_box.pose
+        registration = reference_output_trace.frames[index].registration
+        reference = (
+            registration.candidate_pose_annotation
+            if registration is not None
+            and registration.candidate_pose_annotation is not None
+            else input_reference
+        )
         if phase == 0.0:
             perturbed_annotation = reference
         else:
@@ -350,10 +407,12 @@ def _perturb_observation(
 def _evaluate_recovery(
     reference_case: RefinementCase,
     perturbed_case: RefinementCase,
+    reference_output_trace: GeometricRefinementTrace,
     output_trace: GeometricRefinementTrace,
     perturbations: tuple[ControlledFramePerturbation, ...],
     profile: ControlledPerturbationProfile,
     anchor_frame_id: str,
+    algorithm_variant: str,
 ) -> ControlledRecoveryReport:
     indices = {
         frame.frame_id: index for index, frame in enumerate(reference_case.frames)
@@ -366,6 +425,13 @@ def _evaluate_recovery(
         frame = reference_case.frames[index]
         reference_pose = reference_case.track.observations[index].coarse_box.pose
         input_pose = perturbed_case.track.observations[index].coarse_box.pose
+        reference_registration = reference_output_trace.frames[index].registration
+        algorithm_reference_pose = (
+            reference_registration.candidate_pose_annotation
+            if reference_registration is not None
+            and reference_registration.candidate_pose_annotation is not None
+            else reference_pose
+        )
         registration = output_trace.frames[index].registration
         output_pose = (
             registration.candidate_pose_annotation
@@ -373,11 +439,13 @@ def _evaluate_recovery(
             and registration.candidate_pose_annotation is not None
             else input_pose
         )
-        input_translation, input_yaw = _pose_error(
-            frame.world_from_annotation, reference_pose, input_pose
-        )
+        input_translation = perturbation.translation_m
+        input_yaw = abs(perturbation.yaw_deg)
         output_translation, output_yaw = _pose_error(
             frame.world_from_annotation, reference_pose, output_pose
+        )
+        equivariant_translation, equivariant_yaw = _pose_error(
+            frame.world_from_annotation, algorithm_reference_pose, output_pose
         )
         frame_results.append(
             ControlledFrameRecovery(
@@ -394,6 +462,14 @@ def _evaluate_recovery(
                     input_translation, output_translation
                 ),
                 yaw_recovery_fraction=_recovery_fraction(input_yaw, output_yaw),
+                equivariant_output_translation_error_m=equivariant_translation,
+                equivariant_output_yaw_error_deg=equivariant_yaw,
+                equivariant_translation_recovery_fraction=_recovery_fraction(
+                    input_translation, equivariant_translation
+                ),
+                equivariant_yaw_recovery_fraction=_recovery_fraction(
+                    input_yaw, equivariant_yaw
+                ),
             )
         )
     if not frame_results:
@@ -407,10 +483,17 @@ def _evaluate_recovery(
     )
     input_yaw_rms = _rms([frame.injected_yaw_deg for frame in frame_results])
     output_yaw_rms = _rms([frame.output_yaw_error_deg for frame in frame_results])
+    equivariant_translation_rms = _rms(
+        [frame.equivariant_output_translation_error_m for frame in frame_results]
+    )
+    equivariant_yaw_rms = _rms(
+        [frame.equivariant_output_yaw_error_deg for frame in frame_results]
+    )
     statuses = [frame.output_status for frame in frame_results]
     return ControlledRecoveryReport(
         case_id=reference_case.case_id,
         track_id=reference_case.track.track_id,
+        algorithm_variant=algorithm_variant,
         profile=profile,
         anchor_frame_id=anchor_frame_id,
         geometry_frame_count=len(perturbations),
@@ -438,6 +521,26 @@ def _evaluate_recovery(
         / len(frame_results),
         improved_yaw_frame_fraction=sum(
             frame.output_yaw_error_deg < frame.injected_yaw_deg - 1e-9
+            for frame in frame_results
+        )
+        / len(frame_results),
+        equivariant_output_translation_rms_m=equivariant_translation_rms,
+        equivariant_output_yaw_rms_deg=equivariant_yaw_rms,
+        equivariant_translation_rms_reduction_fraction=(
+            _recovery_fraction(input_translation_rms, equivariant_translation_rms)
+            or 0.0
+        ),
+        equivariant_yaw_rms_reduction_fraction=(
+            _recovery_fraction(input_yaw_rms, equivariant_yaw_rms) or 0.0
+        ),
+        equivariant_improved_translation_frame_fraction=sum(
+            frame.equivariant_output_translation_error_m
+            < frame.injected_translation_m - 1e-9
+            for frame in frame_results
+        )
+        / len(frame_results),
+        equivariant_improved_yaw_frame_fraction=sum(
+            frame.equivariant_output_yaw_error_deg < frame.injected_yaw_deg - 1e-9
             for frame in frame_results
         )
         / len(frame_results),

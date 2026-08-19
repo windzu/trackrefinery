@@ -10,8 +10,10 @@ from pathlib import Path
 from trackrefinery.adapters import export_x4d_clip_inference
 from trackrefinery.component_consensus import (
     COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION,
+    POSE_GRAPH_VARIANTS,
     ComponentConsensusRefiner,
     ComponentConsensusSettings,
+    aggregate_geometry_components_pose_graph,
 )
 from trackrefinery.controlled_recovery import (
     DEFAULT_CONTROLLED_PERTURBATION_PROFILES,
@@ -219,6 +221,11 @@ def build_controlled_recovery_suite_main(
     parser.add_argument(
         "--profile", action="append", choices=("mild", "medium", "strong")
     )
+    parser.add_argument(
+        "--algorithm-variant",
+        choices=("sequential_v2_1", *sorted(POSE_GRAPH_VARIANTS)),
+        default="sequential_v2_1",
+    )
     parser.add_argument("--data-source")
     parser.add_argument("--settings", help="component-consensus settings JSON")
     parser.add_argument("--output", required=True)
@@ -237,6 +244,17 @@ def build_controlled_recovery_suite_main(
     )
     output = Path(args.output).resolve()
     bundles: list[Path] = []
+    aggregation_backend = None
+    if args.algorithm_variant != "sequential_v2_1":
+
+        def aggregation_backend(case, trace, settings):
+            return aggregate_geometry_components_pose_graph(
+                case,
+                trace,
+                settings,
+                variant=args.algorithm_variant,
+            ).trace
+
     for case_id in args.case_id:
         case = dataset.load_case(case_id)
         baseline = ComponentConsensusRefiner(settings).refine_with_trace(case)
@@ -246,11 +264,17 @@ def build_controlled_recovery_suite_main(
                 profile=profile,
                 settings=settings,
                 component_trace=baseline.trace,
+                aggregation_backend=aggregation_backend,
+                algorithm_variant=args.algorithm_variant,
             )
             bundles.append(
                 build_controlled_recovery_bundle(
                     run,
-                    output / "cases" / case.case_id / profile.name,
+                    output
+                    / "cases"
+                    / case.case_id
+                    / args.algorithm_variant
+                    / profile.name,
                     data_source=args.data_source or dataset.dataset_id,
                     max_points_per_frame=args.max_points_per_frame,
                 )
@@ -354,6 +378,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     recovery_parser.add_argument("--case-id", action="append", required=True)
     recovery_parser.add_argument(
         "--profile", action="append", choices=("mild", "medium", "strong")
+    )
+    recovery_parser.add_argument(
+        "--algorithm-variant",
+        choices=("sequential_v2_1", *sorted(POSE_GRAPH_VARIANTS)),
+        default="sequential_v2_1",
     )
     recovery_parser.add_argument("--data-source")
     recovery_parser.add_argument("--settings")
