@@ -129,6 +129,9 @@ def build_review_bundle(
     )
 
     aggregate_groups: list[NDArray[np.float32]] = []
+    input_track_aggregate_groups: list[NDArray[np.float32]] | None = (
+        [] if review_mode == "algorithm_candidate" else None
+    )
     frame_indices: list[NDArray[np.int16]] = []
     gold_aggregate_groups: list[NDArray[np.float32]] = []
     gold_frame_indices: list[NDArray[np.int16]] = []
@@ -225,6 +228,10 @@ def build_review_bundle(
         )
         local = inverse_transform_points(points, alignment_pose).astype(np.float32)
         aggregate_groups.append(local)
+        if input_track_aggregate_groups is not None:
+            input_track_aggregate_groups.append(
+                inverse_transform_points(points, coarse_box.pose).astype(np.float32)
+            )
         frame_indices.append(np.full(len(local), frame_index, dtype=np.int16))
         if gold_box is not None:
             gold_local = inverse_transform_points(points, gold_box.pose).astype(
@@ -250,7 +257,20 @@ def build_review_bundle(
         )
 
     aggregate = np.concatenate(aggregate_groups)
+    input_track_aggregate = (
+        np.concatenate(input_track_aggregate_groups)
+        if input_track_aggregate_groups is not None
+        else None
+    )
     aggregate_frame_index = np.concatenate(frame_indices)
+    has_input_track_comparison = input_track_aggregate is not None and (
+        isinstance(outcome, RefinementSuccess)
+        or any(
+            isinstance(item["registration_box"], Box3D)
+            or isinstance(item["cuboid_candidate_box"], Box3D)
+            for item in preview_frames
+        )
+    )
     gold_aggregate = (
         np.concatenate(gold_aggregate_groups) if gold_aggregate_groups else None
     )
@@ -268,6 +288,23 @@ def build_review_bundle(
     if aggregate_evidence_state is not None:
         aggregate_payload["evidence_state"] = aggregate_evidence_state
     np.savez_compressed(output / "aggregate.npz", **aggregate_payload)
+    if has_input_track_comparison:
+        assert input_track_aggregate is not None
+        input_track_payload = {
+            "points_xyz": input_track_aggregate,
+            "frame_index": aggregate_frame_index,
+            "frame_ids": np.asarray([frame.frame_id for frame in case.frames]),
+        }
+        if aggregate_evidence_state is not None:
+            input_track_payload["evidence_state"] = aggregate_evidence_state
+        np.savez_compressed(output / "input_track_aggregate.npz", **input_track_payload)
+    else:
+        (output / "input_track_aggregate.npz").unlink(missing_ok=True)
+        for name in (
+            "alignment_comparison_top.png",
+            "alignment_comparison_side.png",
+        ):
+            (thumbnails / name).unlink(missing_ok=True)
     if gold_aggregate is not None and gold_aggregate_frame_index is not None:
         gold_payload = {
             "points_xyz": gold_aggregate,
@@ -313,6 +350,7 @@ def build_review_bundle(
         "has_metrics": evaluation is not None,
         "has_evidence_trace": trace is not None,
         "has_registration_trace": canonical_shape is not None,
+        "has_input_track_comparison": has_input_track_comparison,
         "has_cuboid_candidate": (
             cuboid_fit is not None and cuboid_fit.status == "candidate"
         ),
@@ -323,6 +361,9 @@ def build_review_bundle(
         "evidence_masks_path": "evidence_masks.npz" if trace is not None else None,
         "canonical_shape_path": (
             "canonical_shape.npz" if canonical_shape is not None else None
+        ),
+        "input_track_aggregate_path": (
+            "input_track_aggregate.npz" if has_input_track_comparison else None
         ),
         "gold_aggregate_path": (
             "gold_aggregate.npz" if gold_aggregate is not None else None
@@ -354,6 +395,7 @@ def build_review_bundle(
             thumbnails,
             aggregate,
             aggregate_frame_index,
+            input_track_aggregate if has_input_track_comparison else None,
             gold_aggregate,
             gold_aggregate_frame_index,
             aggregate_evidence_state,
@@ -370,6 +412,7 @@ def build_review_bundle(
             outcome,
             aggregate,
             aggregate_frame_index,
+            input_track_aggregate if has_input_track_comparison else None,
             gold_aggregate,
             gold_aggregate_frame_index,
             aggregate_evidence_state,
@@ -470,6 +513,9 @@ def _review_bundle_index_row(
     seen_case_ids.add(case_id)
     review_mode = manifest.get("review_mode", "algorithm_candidate")
     canonical_top = bundle / "thumbnails" / "canonical_registration_top.png"
+    comparison_top = bundle / "thumbnails" / "alignment_comparison_top.png"
+    comparison_side = bundle / "thumbnails" / "alignment_comparison_side.png"
+    evidence_top = bundle / "thumbnails" / "aggregate_evidence_top.png"
     if review_mode == "algorithm_candidate":
         alignment_label = "Algorithm registration"
     elif review_mode == "source_annotation_reference":
@@ -502,6 +548,21 @@ def _review_bundle_index_row(
         "canonical_top_label": (
             "Cross-frame-supported canonical shape · TOP"
             if canonical_top.is_file()
+            else None
+        ),
+        "alignment_comparison_top_path": (
+            comparison_top.relative_to(output).as_posix()
+            if comparison_top.is_file()
+            else None
+        ),
+        "alignment_comparison_side_path": (
+            comparison_side.relative_to(output).as_posix()
+            if comparison_side.is_file()
+            else None
+        ),
+        "aggregate_evidence_top_path": (
+            evidence_top.relative_to(output).as_posix()
+            if evidence_top.is_file()
             else None
         ),
     }
@@ -609,6 +670,7 @@ def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
     .instance-card {{ overflow: hidden; border: 1px solid #334155;
       border-radius: 12px; background: #111827; cursor: pointer; padding: 12px; }}
     .instance-card.mode-algorithm_candidate {{ border-left: 6px solid #e879f9; }}
+    .instance-card.has-comparison {{ grid-column: 1 / -1; }}
     .instance-card.mode-model_candidate_baseline {{ border-left: 6px solid #38bdf8; }}
     .instance-card.mode-source_annotation_reference {{
       border-left: 6px solid #fbbf24; }}
@@ -624,8 +686,10 @@ def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
     .mode-source_annotation_reference {{ color: #fcd34d; }}
     .views {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }}
     .views.three {{ grid-template-columns: repeat(3, 1fr); }}
+    .views.four {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     figure {{ margin: 0; background: white; border-radius: 7px; overflow: hidden; }}
     img {{ display: block; width: 100%; aspect-ratio: 8/5; object-fit: contain; }}
+    .alignment-comparison img {{ aspect-ratio: 12/5; }}
     figcaption {{ color: #334155; font-size: 11px; padding: 3px 7px 5px; }}
     .instance-card p {{ margin: 7px 0 0; color: #94a3b8; font-size: 12px; }}
     .instance-card .mode {{ color: #cbd5e1; }}
@@ -725,12 +789,38 @@ def _clip_instance_card(instance: object) -> str:
     side_label = html_module.escape(
         str(instance.get("aggregate_side_label") or "Side aggregate")
     )
-    figures = [
-        f'<figure><img loading="lazy" src="{top}" alt="{top_label}">'
-        f"<figcaption>{top_label}</figcaption></figure>",
-        f'<figure><img loading="lazy" src="{side}" alt="{side_label}">'
-        f"<figcaption>{side_label}</figcaption></figure>",
-    ]
+    comparison_top = instance.get("alignment_comparison_top_path")
+    comparison_side = instance.get("alignment_comparison_side_path")
+    has_comparison = all(
+        isinstance(path, str) and path for path in (comparison_top, comparison_side)
+    )
+    if has_comparison:
+        figures = [
+            '<figure class="alignment-comparison"><img loading="lazy" '
+            f'src="{html_module.escape(str(comparison_top), quote=True)}" '
+            'alt="Before/after TOP alignment comparison"><figcaption>'
+            "Same-instance A/B · TOP · identical points and axes</figcaption></figure>",
+            '<figure class="alignment-comparison"><img loading="lazy" '
+            f'src="{html_module.escape(str(comparison_side), quote=True)}" '
+            'alt="Before/after SIDE alignment comparison"><figcaption>'
+            "Same-instance A/B · SIDE · identical points and axes"
+            "</figcaption></figure>",
+        ]
+        evidence = instance.get("aggregate_evidence_top_path")
+        if isinstance(evidence, str) and evidence:
+            evidence_path = html_module.escape(evidence, quote=True)
+            figures.append(
+                f'<figure><img loading="lazy" src="{evidence_path}" '
+                'alt="Algorithm evidence classification"><figcaption>'
+                "Algorithm evidence classification · TOP</figcaption></figure>"
+            )
+    else:
+        figures = [
+            f'<figure><img loading="lazy" src="{top}" alt="{top_label}">'
+            f"<figcaption>{top_label}</figcaption></figure>",
+            f'<figure><img loading="lazy" src="{side}" alt="{side_label}">'
+            f"<figcaption>{side_label}</figcaption></figure>",
+        ]
     canonical = instance.get("canonical_top_path")
     if isinstance(canonical, str) and canonical:
         canonical_path = html_module.escape(canonical, quote=True)
@@ -742,7 +832,13 @@ def _clip_instance_card(instance: object) -> str:
             f'alt="{canonical_label}"><figcaption>{canonical_label}</figcaption>'
             "</figure>"
         )
-    views_class = "views three" if len(figures) == 3 else "views"
+    views_class = {
+        3: "views three",
+        4: "views four",
+    }.get(len(figures), "views")
+    card_class = "instance-card"
+    if has_comparison:
+        card_class += " has-comparison"
     release_warning = (
         '<p class="release-warning">Candidate geometry only; do not use as '
         "an annotation result.</p>"
@@ -750,7 +846,7 @@ def _clip_instance_card(instance: object) -> str:
         else ""
     )
     return (
-        f'<article class="instance-card mode-{html_module.escape(mode)}" '
+        f'<article class="{card_class} mode-{html_module.escape(mode)}" '
         f'data-review-mode="{html_module.escape(mode, quote=True)}" '
         f'onclick="openInstance({html_module.escape(json.dumps(preview), quote=True)}, '
         f'{html_module.escape(json.dumps(case_id), quote=True)})">'
@@ -1095,10 +1191,113 @@ img {{ width: 100%; display: block; }}
     )
 
 
+def _write_alignment_comparison_thumbnails(
+    output: Path,
+    input_track_aggregate: NDArray[np.float32],
+    algorithm_aggregate: NDArray[np.float32],
+    frame_index: NDArray[np.int16],
+    preview_frames: list[dict[str, object]],
+    outcome: RefinementOutcome,
+    cuboid_fit: CuboidFitTrace | None,
+) -> None:
+    """Render fair before/after views from identical selected point indices."""
+
+    import matplotlib.pyplot as plt
+
+    if len(input_track_aggregate) != len(algorithm_aggregate):
+        raise ValueError("alignment comparison aggregates must contain the same points")
+    input_size = tuple(
+        np.median(
+            [
+                item["coarse_box"].size_lwh
+                for item in preview_frames
+                if isinstance(item["coarse_box"], Box3D)
+            ],
+            axis=0,
+        )
+    )
+    algorithm_size, algorithm_label, algorithm_color = _review_display_geometry(
+        preview_frames, outcome, cuboid_fit
+    )
+    if isinstance(outcome, RefinementSuccess):
+        algorithm_title = "AFTER · refined result alignment"
+    elif cuboid_fit is not None and cuboid_fit.status == "candidate":
+        algorithm_title = "AFTER · cuboid candidate alignment"
+    else:
+        algorithm_title = "AFTER · registration candidate alignment"
+        algorithm_label = "input size only · no fitted size"
+    input_box = Box3D((0.0, 0.0, 0.0), input_size, (0.0, 0.0, 0.0, 1.0))
+    algorithm_box = Box3D((0.0, 0.0, 0.0), algorithm_size, (0.0, 0.0, 0.0, 1.0))
+    frame_maximum = max(1, int(np.max(frame_index)))
+    for name, first, second, x_label, y_label in (
+        ("alignment_comparison_top.png", 0, 1, "X (m)", "Y (m)"),
+        ("alignment_comparison_side.png", 0, 2, "X (m)", "Z (m)"),
+    ):
+        figure, axes = plt.subplots(
+            1,
+            2,
+            figsize=(12, 5),
+            sharex=True,
+            sharey=True,
+            constrained_layout=True,
+        )
+        projected = np.concatenate(
+            [
+                input_track_aggregate[:, [first, second]],
+                algorithm_aggregate[:, [first, second]],
+                box_corners(input_box)[:, [first, second]],
+                box_corners(algorithm_box)[:, [first, second]],
+            ]
+        )
+        lower = np.min(projected, axis=0)
+        upper = np.max(projected, axis=0)
+        padding = np.maximum((upper - lower) * 0.05, 0.05)
+        for axis, points, title, box, color, label in (
+            (
+                axes[0],
+                input_track_aggregate,
+                "BEFORE · model-track alignment",
+                input_box,
+                "#ffab00",
+                "input median box",
+            ),
+            (
+                axes[1],
+                algorithm_aggregate,
+                algorithm_title,
+                algorithm_box,
+                algorithm_color,
+                algorithm_label,
+            ),
+        ):
+            axis.scatter(
+                points[:, first],
+                points[:, second],
+                c=frame_index,
+                s=0.8,
+                cmap="turbo",
+                vmin=0,
+                vmax=frame_maximum,
+                alpha=0.58,
+            )
+            _plot_box_projection(axis, box, first, second, color, label)
+            axis.set_title(title)
+            axis.set_xlabel(x_label)
+            axis.set_ylabel(y_label)
+            axis.set_xlim(lower[0] - padding[0], upper[0] + padding[0])
+            axis.set_ylim(lower[1] - padding[1], upper[1] + padding[1])
+            axis.set_aspect("equal", adjustable="box")
+            axis.legend(loc="best", fontsize=7)
+        figure.suptitle("Same selected points · same frame colors · shared axes")
+        figure.savefig(output / name, dpi=120)
+        plt.close(figure)
+
+
 def _write_thumbnails(
     output: Path,
     aggregate: NDArray[np.float32],
     frame_index: NDArray[np.int16],
+    input_track_aggregate: NDArray[np.float32] | None,
     gold_aggregate: NDArray[np.float32] | None,
     gold_frame_index: NDArray[np.int16] | None,
     evidence_state: NDArray[np.uint8] | None,
@@ -1118,6 +1317,17 @@ def _write_thumbnails(
         raise RuntimeError(
             "review bundle rendering requires 'pip install trackrefinery[review]'"
         ) from error
+
+    if input_track_aggregate is not None:
+        _write_alignment_comparison_thumbnails(
+            output,
+            input_track_aggregate,
+            aggregate,
+            frame_index,
+            preview_frames,
+            outcome,
+            cuboid_fit,
+        )
 
     for name, axes in {
         "aggregate_top.png": (0, 1, "X (m)", "Y (m)"),
@@ -1378,6 +1588,7 @@ def _write_html(
     outcome: RefinementOutcome,
     aggregate: NDArray[np.float32],
     aggregate_frame_index: NDArray[np.int16],
+    input_track_aggregate: NDArray[np.float32] | None,
     gold_aggregate: NDArray[np.float32] | None,
     gold_aggregate_frame_index: NDArray[np.int16] | None,
     aggregate_evidence_state: NDArray[np.uint8] | None,
@@ -1395,6 +1606,39 @@ def _write_html(
         raise RuntimeError(
             "review bundle rendering requires 'pip install trackrefinery[review]'"
         ) from error
+
+    input_track_figure = None
+    if input_track_aggregate is not None:
+        input_track_figure = go.Figure()
+        for index, frame in enumerate(case.frames):
+            points = input_track_aggregate[aggregate_frame_index == index]
+            input_track_figure.add_trace(
+                go.Scatter3d(
+                    x=points[:, 0],
+                    y=points[:, 1],
+                    z=points[:, 2],
+                    mode="markers",
+                    marker={"size": 1.5, "opacity": 0.55},
+                    name=frame.frame_id,
+                )
+            )
+        input_size = tuple(
+            np.median(
+                [item.coarse_box.size_lwh for item in case.track.observations],
+                axis=0,
+            )
+        )
+        _add_plotly_box(
+            input_track_figure,
+            Box3D((0.0, 0.0, 0.0), input_size, (0.0, 0.0, 0.0, 1.0)),
+            "input median box",
+            "#ffab00",
+        )
+        input_track_figure.update_layout(
+            title="BEFORE · model-track-aligned aggregate",
+            scene={"aspectmode": "data"},
+            margin={"l": 0, "r": 0, "t": 45, "b": 0},
+        )
 
     aggregate_figure = go.Figure()
     for index, frame in enumerate(case.frames):
@@ -1635,8 +1879,23 @@ def _write_html(
             ],
         ),
     )
+    input_track_html = (
+        pio.to_html(input_track_figure, include_plotlyjs=True, full_html=False)
+        if input_track_figure is not None
+        else ""
+    )
     aggregate_html = pio.to_html(
-        aggregate_figure, include_plotlyjs=True, full_html=False
+        aggregate_figure,
+        include_plotlyjs=input_track_figure is None,
+        full_html=False,
+    )
+    alignment_comparison_html = (
+        '<h2>Alignment A/B</h2><p class="comparison-note">Same selected point '
+        "indices, same per-frame colors; only the alignment poses differ.</p>"
+        '<div class="alignment-comparison-grid"><div>'
+        f"{input_track_html}</div><div>{aggregate_html}</div></div>"
+        if input_track_html
+        else ""
     )
     gold_aggregate_html = (
         pio.to_html(
@@ -1682,9 +1941,11 @@ def _write_html(
             f"{value:.3f} m" for value in trace.cuboid_fit.canonical_size_lwh
         )
     )
-    view_tabs = [
-        ("algorithm", "Algorithm aggregate", aggregate_html),
-    ]
+    view_tabs = (
+        [("comparison", "Alignment A/B", alignment_comparison_html)]
+        if alignment_comparison_html
+        else [("algorithm", "Algorithm aggregate", aggregate_html)]
+    )
     if gold_aggregate_html:
         view_tabs.append(("annotation", "Annotation aggregate", gold_aggregate_html))
     if canonical_html:
@@ -1741,6 +2002,12 @@ def _write_html(
     .view-tab.active {{ background: #2563eb; border-color: #60a5fa; }}
     .view-panel {{ display: none; }}
     .view-panel.active {{ display: block; }}
+    .alignment-comparison-grid {{ display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }}
+    .comparison-note {{ color: #475569; }}
+    @media (max-width: 900px) {{
+      .alignment-comparison-grid {{ grid-template-columns: 1fr; }}
+    }}
   </style>
 </head>
 <body>

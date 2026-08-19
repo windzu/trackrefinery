@@ -184,8 +184,10 @@ not change the source-only inference contract.
 The real-Clip catalog uses prominent mode badges and filters to distinguish
 algorithm candidates, frozen model-track baselines, and annotation references.
 All card images are multi-frame aggregates and name their alignment source.
-Algorithm cards keep their aligned top and side views together and add the
-cross-frame-supported canonical shape as a separately labeled third view.
+Algorithm cards lead with top and side A/B figures built from identical point
+indices, frame colors, and plot axes: the left side uses frozen input-track
+poses and the right side uses algorithm poses. Evidence classification and the
+cross-frame-supported canonical shape remain separately labeled views.
 
 The CLI accepts the same sidecar through
 `trackrefinery-build-review --trace traces/case/evidence_trace.json ...`.

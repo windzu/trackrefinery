@@ -100,12 +100,15 @@ review/<run_id>/<case_id>/
   result.json
   metrics.json                 # when a gold target is available
   aggregate.npz                # selected points in candidate/refined frame
+  input_track_aggregate.npz    # same points aligned by frozen input-track poses
   gold_aggregate.npz           # same points aligned by gold poses; review only
   canonical_shape.npz          # registration-stage persistent evidence
   preview.html                 # self-contained or locally served viewer
   thumbnails/
     aggregate_top.png
     aggregate_side.png
+    alignment_comparison_top.png
+    alignment_comparison_side.png
     canonical_registration_top.png
     worst_frame_<id>.png
 ```
@@ -120,6 +123,14 @@ algorithm-aligned aggregate and an annotation-pose-aligned aggregate. They use
 the same displayed point indices and differ only in the alignment pose, so the
 comparison does not hide errors by changing the crop. Target poses remain in
 the evaluation/review path and are never passed to the backend.
+
+An algorithm bundle applies the same rule to its frozen model-track baseline:
+`input_track_aggregate.npz` and `aggregate.npz` contain exactly the same point
+indices and frame-index colors, transformed only by the input-track poses or
+the algorithm poses. Fixed top and side A/B figures use shared axes. This is
+the primary visual test for whether registration reduces rather than increases
+smearing; comparisons across different instances or sampling budgets are not
+valid evidence of improvement.
 
 A fixed aggregate alone is insufficient: pose errors can cancel or smear in
 aggregation and hide which frame is wrong. The web viewer therefore provides:
@@ -177,10 +188,10 @@ Every catalog thumbnail is explicitly labeled as a multi-frame aggregate. Mode
 badges, colored card borders, counts, and filters distinguish TrackRefinery
 algorithm candidates, frozen inference-and-tracking baselines, and source
 annotation references. Top and side thumbnails on one card must use the same
-alignment source. When an algorithm bundle has a canonical shape, the card adds
-it as a third, separately labeled view instead of substituting it for only one
-of the aligned top/side views. An unsuccessful algorithm outcome must be marked
-not released and must not visually resemble an accepted annotation result. A
+alignment source. An algorithm card spans the catalog width and leads with
+same-instance top/side A/B figures before showing evidence classification and
+the canonical shape. An unsuccessful algorithm outcome must be marked not
+released and must not visually resemble an accepted annotation result. A
 successful outcome remains a candidate for caller review; the catalog never
 claims that it has been released.
 
