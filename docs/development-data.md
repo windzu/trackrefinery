@@ -60,6 +60,16 @@ materialization identity, detector checkpoint, tracker/profile identity, and
 exporter version. Coarse predictions are immutable benchmark input; rerunning a
 new detector creates a different input suite.
 
+The current local catalog has four real Clip tabs and 119 instance cards. The
+81 tracks for `20260817_G150-002_000` come from the frozen CenterPoint
+`offline-geometry-v3` candidate and are qualitative because that Clip has no
+reviewed target. The other 38 tracks come from current source annotations and
+are review-only alignment references: they are neither frozen detector inputs
+nor reviewed gold. Consequently, no current Clip yet supports a qualified
+coarse-versus-refined-versus-gold comparison. The next benchmark preparation
+step is to freeze model candidates for the three annotated Clips and review
+matched target tracks independently in X-Points.
+
 ## Gold-target preparation
 
 Existing annotation is a candidate target, not automatically gold. Selected

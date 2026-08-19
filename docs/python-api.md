@@ -129,7 +129,11 @@ python -m pip install 'trackrefinery[review]'
 ```
 
 ```python
-from trackrefinery import build_review_bundle, build_review_suite
+from trackrefinery import (
+    build_clip_review_suite,
+    build_review_bundle,
+    build_review_suite,
+)
 
 build_review_bundle(
     case,
@@ -147,6 +151,19 @@ build_review_suite(
         "review/run-001/cases/moving_complete",
     ],
     title="Regression run 001",
+)
+
+build_clip_review_suite(
+    "review/real-clips",
+    {
+        "clip-001": [
+            "review/real-clips/clips/clip-001/instances/vehicle-01",
+            "review/real-clips/clips/clip-001/instances/vehicle-02",
+        ],
+        "clip-002": [
+            "review/real-clips/clips/clip-002/instances/vehicle-05",
+        ],
+    },
 )
 ```
 
@@ -166,3 +183,32 @@ not change the source-only inference contract.
 
 The CLI accepts the same sidecar through
 `trackrefinery-build-review --trace traces/case/evidence_trace.json ...`.
+
+## Export an X-4D Clip into source-only inputs
+
+Install the optional adapter alongside a Dataset 0.17 compatible Devkit:
+
+```bash
+python -m pip install 'trackrefinery[x4d,review]'
+```
+
+```python
+from trackrefinery import export_x4d_clip_inference
+
+exported = export_x4d_clip_inference(
+    "/data/clips/20260817_G150-002_000",
+    "/data/candidates/centerpoint-offline-geometry-v3.json",
+    "/data/trackrefinery/inference/20260817_G150-002_000",
+    role="qualitative",
+    source_kind="model_candidate",
+)
+```
+
+The adapter discovers all metadata-declared LiDAR channels, transforms each
+current-keyframe cloud into `meta.annotation_frame_id`, preserves exact
+`uint64` point times and sensor provenance, records filtered non-finite point
+counts, and writes one shared frame sequence plus one track file per instance.
+It accepts either native annotation-v3 JSON or a protocol-v2 candidate
+envelope. The export step and algorithm step remain separate: the refiner opens
+only the generated `inference/` root and has no path to native annotations or
+evaluation targets.

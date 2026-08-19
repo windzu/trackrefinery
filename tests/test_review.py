@@ -12,10 +12,14 @@ from trackrefinery import (
     write_geometric_trace,
     write_outcome,
 )
-from trackrefinery.cli import build_review_main
+from trackrefinery.cli import build_clip_review_suite_main, build_review_main
 from trackrefinery.dataset import InferenceDataset
 from trackrefinery.evaluation import evaluate_case
-from trackrefinery.review import build_review_bundle, build_review_suite
+from trackrefinery.review import (
+    build_clip_review_suite,
+    build_review_bundle,
+    build_review_suite,
+)
 from trackrefinery.synthetic import generate_dataset
 from trackrefinery.targets import TargetDataset
 
@@ -114,6 +118,35 @@ def test_review_bundle_renders_algorithm_evidence_trace(tmp_path: Path) -> None:
     assert "Annotation aggregate" not in html
 
 
+def test_catalog_review_bundle_is_lightweight_and_explicitly_baseline(
+    tmp_path: Path,
+) -> None:
+    generated = generate_dataset(tmp_path / "synthetic")
+    case = InferenceDataset.open(generated.inference_root).load_case("static_complete")
+    run = JointCuboidRefiner().refine_with_trace(case)
+
+    bundle = build_review_bundle(
+        case,
+        run.outcome,
+        tmp_path / "catalog",
+        data_source="frozen model candidate",
+        review_mode="model_candidate_baseline",
+        detail_level="catalog",
+        crop_scale=1.2,
+        max_points_per_frame=100,
+    )
+
+    manifest = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
+    assert manifest["detail_level"] == "catalog"
+    assert manifest["review_mode"] == "model_candidate_baseline"
+    assert (bundle / "thumbnails" / "aggregate_top.png").is_file()
+    assert (bundle / "thumbnails" / "aggregate_side.png").is_file()
+    assert not (bundle / "thumbnails" / "aggregate_front.png").exists()
+    html = (bundle / "preview.html").read_text(encoding="utf-8")
+    assert "Model candidate baseline; refinement not run" in html
+    assert "plotly" not in html.lower()
+
+
 def test_review_cli_accepts_portable_evidence_trace(tmp_path: Path) -> None:
     generated = generate_dataset(tmp_path / "synthetic")
     case = InferenceDataset.open(generated.inference_root).load_case("static_complete")
@@ -189,3 +222,72 @@ def test_review_suite_indexes_case_bundles_as_tabs(tmp_path: Path) -> None:
     assert "moving_complete" in html
     assert html.count('class="case-tab') == 2
     assert html.count("<iframe") == 2
+
+
+def test_clip_review_suite_groups_instances_as_cards_under_clip_tabs(
+    tmp_path: Path,
+) -> None:
+    generated = generate_dataset(tmp_path / "synthetic")
+    inference = InferenceDataset.open(generated.inference_root)
+    suite_root = tmp_path / "clip-suite"
+    grouped: dict[str, list[Path]] = {"clip-alpha": [], "clip-beta": []}
+    for clip_id, case_ids in {
+        "clip-alpha": ("static_complete", "moving_complete"),
+        "clip-beta": ("partial_visibility",),
+    }.items():
+        for case_id in case_ids:
+            case = inference.load_case(case_id)
+            run = JointCuboidRefiner().refine_with_trace(case)
+            grouped[clip_id].append(
+                build_review_bundle(
+                    case,
+                    run.outcome,
+                    suite_root / "clips" / clip_id / "instances" / case_id,
+                    trace=run.trace,
+                    data_source=clip_id,
+                    review_mode=(
+                        "source_annotation_reference"
+                        if case_id == "partial_visibility"
+                        else "algorithm_candidate"
+                    ),
+                    max_points_per_frame=100,
+                )
+            )
+
+    output = build_clip_review_suite(
+        suite_root,
+        grouped,
+        title="Real Clip review",
+    )
+
+    manifest = json.loads((output / "clip-suite.json").read_text(encoding="utf-8"))
+    assert manifest["contract_version"] == "trackrefinery-clip-review-suite-v1"
+    assert [row["clip_id"] for row in manifest["clips"]] == [
+        "clip-alpha",
+        "clip-beta",
+    ]
+    assert [row["instance_count"] for row in manifest["clips"]] == [2, 1]
+    assert manifest["clips"][1]["instances"][0]["review_mode"] == (
+        "source_annotation_reference"
+    )
+    assert manifest["clips"][1]["instances"][0]["aggregate_top_label"] == (
+        "Annotation-aligned aggregate"
+    )
+    html = (output / "index.html").read_text(encoding="utf-8")
+    assert html.count('<button class="clip-tab') == 2
+    assert html.count('<article class="instance-card"') == 3
+    assert "source annotation reference · not gold · not refined" in html
+
+    status = build_clip_review_suite_main(
+        [
+            "--output",
+            str(suite_root),
+            "--clip-bundle",
+            f"clip-alpha={grouped['clip-alpha'][0]}",
+            "--clip-bundle",
+            f"clip-alpha={grouped['clip-alpha'][1]}",
+            "--clip-bundle",
+            f"clip-beta={grouped['clip-beta'][0]}",
+        ]
+    )
+    assert status == 0

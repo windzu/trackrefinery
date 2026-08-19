@@ -6,6 +6,7 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
+from trackrefinery.adapters import export_x4d_clip_inference
 from trackrefinery.dataset import InferenceDataset
 from trackrefinery.evaluation import (
     AcceptanceThresholds,
@@ -16,6 +17,9 @@ from trackrefinery.evaluation import (
 from trackrefinery.geometric import read_geometric_trace
 from trackrefinery.refiner import validate_outcome
 from trackrefinery.review import (
+    REVIEW_DETAIL_LEVELS,
+    REVIEW_MODES,
+    build_clip_review_suite,
     build_review_bundle,
     build_review_suite,
     serve_review_bundle,
@@ -99,6 +103,8 @@ def build_review_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--thresholds")
     parser.add_argument("--trace")
     parser.add_argument("--data-source")
+    parser.add_argument("--review-mode", choices=sorted(REVIEW_MODES))
+    parser.add_argument("--detail-level", choices=sorted(REVIEW_DETAIL_LEVELS))
     parser.add_argument("--output", required=True)
     parser.add_argument("--crop-scale", type=float, default=1.8)
     parser.add_argument("--max-points-per-frame", type=int, default=8_000)
@@ -128,6 +134,8 @@ def build_review_main(argv: Sequence[str] | None = None) -> int:
         evaluation=report,
         trace=read_geometric_trace(args.trace) if args.trace else None,
         data_source=args.data_source or inference.dataset_id,
+        review_mode=args.review_mode or "algorithm_candidate",
+        detail_level=args.detail_level or "full",
         crop_scale=args.crop_scale,
         max_points_per_frame=args.max_points_per_frame,
     )
@@ -162,6 +170,63 @@ def build_review_suite_main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def build_clip_review_suite_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Build a Clip-tabbed, all-instance review catalog."
+    )
+    parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--clip-bundle",
+        action="append",
+        required=True,
+        metavar="CLIP_ID=BUNDLE_DIR",
+    )
+    parser.add_argument("--title", default="TrackRefinery real Clip review")
+    args = parser.parse_args(argv)
+    clips: dict[str, list[str]] = {}
+    for value in args.clip_bundle:
+        clip_id, separator, bundle = value.partition("=")
+        if not separator or not clip_id or not bundle:
+            raise ValueError("--clip-bundle must be CLIP_ID=BUNDLE_DIR")
+        clips.setdefault(clip_id, []).append(bundle)
+    output = build_clip_review_suite(args.output, clips, title=args.title)
+    print(f"wrote Clip review suite to {output}")
+    return 0
+
+
+def export_x4d_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Export one X-4D Dataset 0.17 Clip into source-only inputs."
+    )
+    parser.add_argument("--clip-dir", required=True)
+    parser.add_argument("--annotation-document", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--role",
+        required=True,
+        choices=("development", "calibration", "test", "qualitative"),
+    )
+    parser.add_argument(
+        "--source-kind",
+        required=True,
+        choices=("model_candidate", "source_annotation_reference"),
+    )
+    args = parser.parse_args(argv)
+    exported = export_x4d_clip_inference(
+        args.clip_dir,
+        args.annotation_document,
+        args.output,
+        role=args.role,
+        source_kind=args.source_kind,
+    )
+    print(
+        f"exported {exported.clip_id}: {len(exported.case_ids)} cases, "
+        f"{len(exported.lidar_channels)} LiDAR channels, "
+        f"{exported.dropped_nonfinite_points} non-finite points dropped"
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="trackrefinery")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -186,6 +251,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     build_parser.add_argument("--thresholds")
     build_parser.add_argument("--trace")
     build_parser.add_argument("--data-source")
+    build_parser.add_argument("--review-mode", choices=sorted(REVIEW_MODES))
+    build_parser.add_argument("--detail-level", choices=sorted(REVIEW_DETAIL_LEVELS))
     build_parser.add_argument("--output", required=True)
     build_parser.add_argument("--crop-scale", type=float, default=1.8)
     build_parser.add_argument("--max-points-per-frame", type=int, default=8_000)
@@ -193,6 +260,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     suite_parser.add_argument("--output", required=True)
     suite_parser.add_argument("--bundle", action="append", required=True)
     suite_parser.add_argument("--title", default="TrackRefinery review suite")
+    clip_suite_parser = subparsers.add_parser("build-clip-review-suite")
+    clip_suite_parser.add_argument("--output", required=True)
+    clip_suite_parser.add_argument("--clip-bundle", action="append", required=True)
+    clip_suite_parser.add_argument("--title", default="TrackRefinery real Clip review")
+    x4d_parser = subparsers.add_parser("export-x4d")
+    x4d_parser.add_argument("--clip-dir", required=True)
+    x4d_parser.add_argument("--annotation-document", required=True)
+    x4d_parser.add_argument("--output", required=True)
+    x4d_parser.add_argument(
+        "--role",
+        required=True,
+        choices=("development", "calibration", "test", "qualitative"),
+    )
+    x4d_parser.add_argument(
+        "--source-kind",
+        required=True,
+        choices=("model_candidate", "source_annotation_reference"),
+    )
     serve_parser = subparsers.add_parser("review")
     serve_parser.add_argument("bundle")
     serve_parser.add_argument("--host", default="127.0.0.1")
@@ -207,6 +292,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "evaluate-suite": evaluate_suite_main,
         "build-review": build_review_main,
         "build-review-suite": build_review_suite_main,
+        "build-clip-review-suite": build_clip_review_suite_main,
+        "export-x4d": export_x4d_main,
         "review": review_main,
     }[args.command](forwarded)
 
