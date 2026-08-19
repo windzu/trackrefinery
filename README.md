@@ -20,12 +20,16 @@ The framework is usable as an installable Python package. It contains the
 validated public contracts, source/target-isolated datasets, deterministic
 fixtures, quantitative evaluation, and visual review bundles.
 
-The accepted algorithm direction is
-[Component-Consensus Geometric Refinement V2](docs/geometric-refinement-v2.md):
-extract one object component per usable frame, aggregate only reliable frames,
-fit one canonical size, and refine every frame pose with that size fixed. It
-does not use learned priors, sensor rays, free-space, or occupancy modeling.
-The `ComponentConsensusRefiner` now implements its first three gated stages:
+Real-data review has moved the accepted production research direction to the
+[size-first learned trajectory plan](docs/learned-refinement-plan-v1.md). The
+first learned milestone estimates one canonical `length/width/height` from a
+complete track and must beat reviewed coarse and geometric baselines before a
+per-frame pose head is developed. No learned backend is release-qualified yet.
+
+[Component-Consensus Geometric Refinement V2](docs/geometric-refinement-v2.md)
+is retained as a frozen comparison and diagnostic direction. It does not act
+as a silent success fallback. The `ComponentConsensusRefiner` implements its
+first three gated stages:
 bounded ROI and ground handling, deterministic 3D component extraction,
 cross-resolution selection stability, conservative merged-component rejection,
 `geometry` / `pose_only` / `trajectory_only` frame roles, and anchored

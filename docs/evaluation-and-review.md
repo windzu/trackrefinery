@@ -76,6 +76,27 @@ The primary product metric is strict successful-track precision. Coverage is
 secondary: returning insufficient evidence is preferable to returning geometry
 that a reviewer must correct.
 
+## Learned-backend promotion order
+
+The accepted learned implementation sequence is specified in
+[`learned-refinement-plan-v1.md`](learned-refinement-plan-v1.md). It adds no
+alternative definition of quality: this document's reviewed-gold metrics and
+human correction outcome remain authoritative.
+
+The learned backend is promoted in three separate decisions:
+
+1. a size-only development result must improve strict size pass rate and every
+   dimension's MAE/P95 over coarse-median and frozen geometric baselines;
+2. joint pose refinement must retain the accepted size result while improving
+   P95 and worst-frame pose metrics; and
+3. calibrated public success must have zero catastrophic successes and meet a
+   precision target frozen before the locked test.
+
+A size-only prediction is a diagnostic sidecar, not `RefinementSuccess`.
+Failure at the size gate blocks pose-model work. Confidence thresholds are fit
+only on the calibration split, and all learned comparisons use identical case
+IDs, target revisions, point evidence, and tabbed per-instance review.
+
 ## Controlled pose-recovery validation
 
 Natural model tracks that already align well are useful non-regression cases,
