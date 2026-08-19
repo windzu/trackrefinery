@@ -107,7 +107,12 @@ input-track alignment and provisional anchored alignment.
 `run_controlled_recovery()` is an evaluator-side diagnostic. It reuses frozen
 component indices, injects deterministic smooth drift into non-anchor geometry
 poses, and runs aggregation against that perturbed case. The original model
-poses remain a proxy reference outside the algorithm run.
+poses remain a proxy reference outside the algorithm run. The evaluator also
+runs the same backend on the unperturbed frozen components so injected-error
+recovery can be measured independently of a repeatable natural-input
+correction. The controlled drift is applied around that unperturbed algorithm
+output so the declared perturbation, rather than a hidden sum of natural and
+artificial corrections, is what exercises the production correction envelope.
 
 ```python
 from trackrefinery import (
@@ -123,10 +128,37 @@ recovery = run_controlled_recovery(
 )
 print(recovery.report.translation_rms_reduction_fraction)
 print(recovery.report.yaw_rms_reduction_fraction)
+print(recovery.report.equivariant_translation_rms_reduction_fraction)
+print(recovery.report.equivariant_yaw_rms_reduction_fraction)
 build_controlled_recovery_bundle(
     recovery,
     "review/recovery/strong",
     data_source="frozen model-track proxy",
+)
+```
+
+To evaluate the V3 sidecar without changing the default refiner, pass an
+explicit backend:
+
+```python
+from trackrefinery import aggregate_geometry_components_pose_graph
+
+
+def normal_pose_graph(case, trace, settings):
+    return aggregate_geometry_components_pose_graph(
+        case,
+        trace,
+        settings,
+        variant="normal_aware_pose_graph",
+    ).trace
+
+
+recovery = run_controlled_recovery(
+    case,
+    profile=DEFAULT_CONTROLLED_PERTURBATION_PROFILES[-1],
+    component_trace=run.trace,
+    aggregation_backend=normal_pose_graph,
+    algorithm_variant="normal_aware_pose_graph",
 )
 ```
 
@@ -138,6 +170,7 @@ tab per source case. The CLI equivalent is:
 trackrefinery-build-controlled-recovery-suite \
   --inference-root my-data/inference \
   --case-id scene-001_vehicle-0042 \
+  --algorithm-variant normal_aware_pose_graph \
   --output review/recovery
 ```
 

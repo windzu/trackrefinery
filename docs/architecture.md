@@ -94,11 +94,19 @@ stage-gated and cannot return success until canonical sizing, fixed-size pose
 refinement, and final acceptance are implemented.
 
 Before sizing, the anchored stage must pass a separate known-error recovery
-gate. That evaluator freezes selected components from a real model track,
-injects deterministic non-anchor XY/yaw drift, and keeps the frozen poses on
-the evaluator side only. This is an isolated test of Stage 3 registration, not
-an alternate runtime input contract, annotation target, or end-to-end crop
-test.
+gate. That evaluator freezes selected components, runs the candidate on the
+unperturbed real model track, and injects deterministic non-anchor XY/yaw drift
+around that natural output. The perturbed run receives only its perturbed
+coarse poses. Reports retain both equivariant recovery to the unperturbed
+algorithm output and absolute drift to the original non-gold model-track
+proxy. This is an isolated test of Stage 3 registration, not an alternate
+runtime input contract, annotation target, or end-to-end crop test.
+
+The accepted Stage 3 redesign is documented in
+[`stage3-pose-graph-v3.md`](stage3-pose-graph-v3.md). It separates observable
+pairwise local measurements from one robust global pose-graph solve, uses exact
+timestamps and frame poses for trajectory consistency, and keeps graph
+diagnostics in an experimental sidecar until the promotion gate passes.
 
 Future experimental backends may use a different implementation without
 changing the public full-frame input or validated success/insufficient outcome.

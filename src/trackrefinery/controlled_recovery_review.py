@@ -19,8 +19,8 @@ from trackrefinery.controlled_recovery import (
 from trackrefinery.geometric.trace import EvidenceState, FrameRole
 from trackrefinery.geometry import inverse_transform_points
 
-CONTROLLED_RECOVERY_REVIEW_CONTRACT = "trackrefinery-controlled-recovery-review-v1"
-CONTROLLED_RECOVERY_SUITE_CONTRACT = "trackrefinery-controlled-recovery-suite-v1"
+CONTROLLED_RECOVERY_REVIEW_CONTRACT = "trackrefinery-controlled-recovery-review-v2"
+CONTROLLED_RECOVERY_SUITE_CONTRACT = "trackrefinery-controlled-recovery-suite-v2"
 
 
 def build_controlled_recovery_bundle(
@@ -43,6 +43,7 @@ def build_controlled_recovery_bundle(
     thumbnails = output / "thumbnails"
     thumbnails.mkdir(parents=True, exist_ok=True)
     perturbations = {item.frame_id: item for item in run.perturbations}
+    proxy_groups: list[NDArray[np.float32]] = []
     reference_groups: list[NDArray[np.float32]] = []
     input_groups: list[NDArray[np.float32]] = []
     output_groups: list[NDArray[np.float32]] = []
@@ -73,6 +74,13 @@ def build_controlled_recovery_bundle(
         positions = _sample_positions(positions, max_points_per_frame)
         indices = frame_trace.roi_point_indices[positions]
         points = frame.points_xyz[indices]
+        reference_registration = run.reference_output_trace.frames[index].registration
+        reference_pose = (
+            reference_registration.candidate_pose_annotation
+            if reference_registration is not None
+            and reference_registration.candidate_pose_annotation is not None
+            else reference_observation.coarse_box.pose
+        )
         registration = run.output_trace.frames[index].registration
         output_pose = (
             registration.candidate_pose_annotation
@@ -80,10 +88,13 @@ def build_controlled_recovery_bundle(
             and registration.candidate_pose_annotation is not None
             else input_observation.coarse_box.pose
         )
-        reference_groups.append(
+        proxy_groups.append(
             inverse_transform_points(
                 points, reference_observation.coarse_box.pose
             ).astype(np.float32)
+        )
+        reference_groups.append(
+            inverse_transform_points(points, reference_pose).astype(np.float32)
         )
         input_groups.append(
             inverse_transform_points(points, input_observation.coarse_box.pose).astype(
@@ -98,12 +109,14 @@ def build_controlled_recovery_bundle(
     if not reference_groups:
         raise ValueError("recovery review requires selected geometry components")
 
+    proxy = np.concatenate(proxy_groups)
     reference = np.concatenate(reference_groups)
     perturbed = np.concatenate(input_groups)
     repaired = np.concatenate(output_groups)
     frame_index = np.concatenate(frame_groups)
     np.savez_compressed(
         output / "aggregates.npz",
+        proxy_points_xyz=proxy,
         reference_points_xyz=reference,
         input_points_xyz=perturbed,
         output_points_xyz=repaired,
@@ -117,6 +130,7 @@ def build_controlled_recovery_bundle(
         "case_id": run.reference_case.case_id,
         "track_id": run.reference_case.track.track_id,
         "category": run.reference_case.track.category,
+        "algorithm_variant": run.report.algorithm_variant,
         "profile": run.report.profile.to_dict(),
         "anchor_frame_id": run.report.anchor_frame_id,
         "geometry_frame_count": run.report.geometry_frame_count,
@@ -125,6 +139,9 @@ def build_controlled_recovery_bundle(
         "selected_component_point_count": selected_point_count,
         "data_source": data_source.strip(),
         "reference_semantics": "frozen_model_track_proxy_not_gold",
+        "equivariant_reference_semantics": (
+            "same_algorithm_unperturbed_output_not_gold"
+        ),
         "metrics": {
             key: value
             for key, value in run.report.to_dict().items()
@@ -141,6 +158,12 @@ def build_controlled_recovery_bundle(
                 "registered_frame_count",
                 "retained_coarse_frame_count",
                 "unavailable_frame_count",
+                "equivariant_output_translation_rms_m",
+                "equivariant_output_yaw_rms_deg",
+                "equivariant_translation_rms_reduction_fraction",
+                "equivariant_yaw_rms_reduction_fraction",
+                "equivariant_improved_translation_frame_fraction",
+                "equivariant_improved_yaw_frame_fraction",
             }
         },
         "aggregate_path": "aggregates.npz",
@@ -155,6 +178,7 @@ def build_controlled_recovery_bundle(
     )
     _write_recovery_thumbnails(
         thumbnails,
+        proxy,
         reference,
         perturbed,
         repaired,
@@ -163,6 +187,7 @@ def build_controlled_recovery_bundle(
     )
     _write_recovery_html(
         output / "preview.html",
+        proxy,
         reference,
         perturbed,
         repaired,
@@ -189,20 +214,29 @@ def build_controlled_recovery_suite(
     output = Path(output_dir).resolve()
     output.mkdir(parents=True, exist_ok=True)
     grouped: dict[str, list[dict[str, object]]] = {}
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for bundle_dir in bundle_dirs:
         row = _recovery_bundle_row(output, bundle_dir)
         profile = row["profile"]
         if not isinstance(profile, dict):
             raise ValueError("recovery profile must be an object")
-        identity = (str(row["case_id"]), str(profile["name"]))
+        identity = (
+            str(row["case_id"]),
+            str(row["algorithm_variant"]),
+            str(profile["name"]),
+        )
         if identity in seen:
             raise ValueError(f"duplicate recovery bundle: {identity}")
         seen.add(identity)
         grouped.setdefault(identity[0], []).append(row)
     cases = []
     for case_id, rows in grouped.items():
-        rows.sort(key=lambda row: float(dict(row["profile"])["maximum_translation_m"]))
+        rows.sort(
+            key=lambda row: (
+                str(row["algorithm_variant"]),
+                float(dict(row["profile"])["maximum_translation_m"]),
+            )
+        )
         cases.append({"case_id": case_id, "profiles": rows})
     manifest = {
         "contract_version": CONTROLLED_RECOVERY_SUITE_CONTRACT,
@@ -227,6 +261,7 @@ def _sample_positions(positions: NDArray[np.int64], maximum: int) -> NDArray[np.
 
 def _write_recovery_thumbnails(
     output: Path,
+    proxy: NDArray[np.float32],
     reference: NDArray[np.float32],
     perturbed: NDArray[np.float32],
     repaired: NDArray[np.float32],
@@ -249,10 +284,11 @@ def _write_recovery_thumbnails(
         ("comparison_side.png", 0, 2, ("X (m)", "Z (m)")),
     ):
         figure, axes = plt.subplots(
-            1, 3, figsize=(16, 5), sharex=True, sharey=True, constrained_layout=True
+            1, 4, figsize=(20, 5), sharex=True, sharey=True, constrained_layout=True
         )
         projected = np.concatenate(
             [
+                proxy[:, [first, second]],
                 reference[:, [first, second]],
                 perturbed[:, [first, second]],
                 repaired[:, [first, second]],
@@ -262,20 +298,22 @@ def _write_recovery_thumbnails(
         upper = np.max(projected, axis=0)
         padding = np.maximum((upper - lower) * 0.05, 0.05)
         titles = (
-            "REFERENCE · frozen model track · proxy, not gold",
+            "PROXY · frozen model track · not gold",
+            "REFERENCE · same algorithm on unperturbed input",
             (
                 f"INPUT · injected up to {report.profile.maximum_translation_m:.2f} m"
                 f" / {report.profile.maximum_yaw_deg:.1f}°"
             ),
             (
-                "OUTPUT · Stage 3 · RMS "
+                "OUTPUT · equivariant RMS "
                 f"{report.input_translation_rms_m:.3f}→"
-                f"{report.output_translation_rms_m:.3f} m, "
-                f"{report.input_yaw_rms_deg:.2f}→{report.output_yaw_rms_deg:.2f}°"
+                f"{report.equivariant_output_translation_rms_m:.3f} m, "
+                f"{report.input_yaw_rms_deg:.2f}→"
+                f"{report.equivariant_output_yaw_rms_deg:.2f}°"
             ),
         )
         for axis, points, title in zip(
-            axes, (reference, perturbed, repaired), titles, strict=True
+            axes, (proxy, reference, perturbed, repaired), titles, strict=True
         ):
             axis.scatter(
                 points[:, first],
@@ -302,6 +340,7 @@ def _write_recovery_thumbnails(
 
 def _write_recovery_html(
     path: Path,
+    proxy: NDArray[np.float32],
     reference: NDArray[np.float32],
     perturbed: NDArray[np.float32],
     repaired: NDArray[np.float32],
@@ -320,7 +359,8 @@ def _write_recovery_html(
     plots: list[str] = []
     for mode_index, (title, aggregate) in enumerate(
         (
-            ("REFERENCE · frozen model-track proxy · not gold", reference),
+            ("PROXY · frozen model-track input · not gold", proxy),
+            ("REFERENCE · same algorithm on unperturbed input", reference),
             ("INPUT · controlled perturbation seen by Stage 3", perturbed),
             ("OUTPUT · anchored aggregation candidate", repaired),
         )
@@ -358,8 +398,10 @@ def _write_recovery_html(
         f"<td>{frame.phase:+.3f}</td>"
         f"<td>{frame.injected_translation_m:.3f} m</td>"
         f"<td>{frame.output_translation_error_m:.3f} m</td>"
+        f"<td>{frame.equivariant_output_translation_error_m:.3f} m</td>"
         f"<td>{frame.injected_yaw_deg:.2f}°</td>"
         f"<td>{frame.output_yaw_error_deg:.2f}°</td>"
+        f"<td>{frame.equivariant_output_yaw_error_deg:.2f}°</td>"
         f"<td>{html_module.escape(frame.output_status)}</td>"
         "</tr>"
         for frame in report.frames
@@ -386,33 +428,37 @@ padding:7px; text-align:left }} pre {{ white-space:pre-wrap; background:#111827;
 padding:12px; border-radius:8px }}
 </style></head><body><header>
 <h1>{html_module.escape(report.case_id)} · {html_module.escape(report.profile.name)}</h1>
-<p>{html_module.escape(data_source)} · anchor {html_module.escape(report.anchor_frame_id)}</p>
-<p class="notice">REFERENCE is the frozen model track used only by this evaluator.
-It is a proxy, not reviewed gold. The algorithm receives INPUT, never REFERENCE poses.</p>
+<p>{html_module.escape(data_source)} · {html_module.escape(report.algorithm_variant)} ·
+anchor {html_module.escape(report.anchor_frame_id)}</p>
+<p class="notice">PROXY is the frozen model track and is not reviewed gold.
+REFERENCE is the same algorithm's unperturbed output. The perturbed run receives
+INPUT only; it never receives PROXY or REFERENCE poses.</p>
 <div class="summary">
-<div class="metric"><b>Translation RMS</b><br>{report.input_translation_rms_m:.3f} →
-{report.output_translation_rms_m:.3f} m<br>
-recovery {report.translation_rms_reduction_fraction:.1%}</div>
-<div class="metric"><b>Yaw RMS</b><br>{report.input_yaw_rms_deg:.2f} →
-{report.output_yaw_rms_deg:.2f}°<br>
-recovery {report.yaw_rms_reduction_fraction:.1%}</div>
-<div class="metric"><b>Improved frames</b><br>translation
-{report.improved_translation_frame_fraction:.1%}<br>yaw
-{report.improved_yaw_frame_fraction:.1%}</div>
+<div class="metric"><b>Equivariant translation RMS</b><br>
+{report.input_translation_rms_m:.3f} →
+{report.equivariant_output_translation_rms_m:.3f} m<br>
+recovery {report.equivariant_translation_rms_reduction_fraction:.1%}</div>
+<div class="metric"><b>Equivariant yaw RMS</b><br>{report.input_yaw_rms_deg:.2f} →
+{report.equivariant_output_yaw_rms_deg:.2f}°<br>
+recovery {report.equivariant_yaw_rms_reduction_fraction:.1%}</div>
+<div class="metric"><b>Absolute proxy RMS</b><br>translation
+{report.output_translation_rms_m:.3f} m · yaw {report.output_yaw_rms_deg:.2f}°</div>
 <div class="metric"><b>Disposition</b><br>{report.registered_frame_count} registered ·
 {report.retained_coarse_frame_count} retained · {report.unavailable_frame_count}
 unavailable</div></div></header><main>
-<img src="thumbnails/comparison_top.png" alt="Reference input output top comparison">
-<nav><button class="active" onclick="showView(0,this)">REFERENCE</button>
-<button onclick="showView(1,this)">INPUT</button>
-<button onclick="showView(2,this)">OUTPUT</button>
-<button onclick="showView(3,this)">Per-frame metrics</button>
-<button onclick="showView(4,this)">JSON</button></nav>
+<img src="thumbnails/comparison_top.png" alt="Proxy reference input output comparison">
+<nav><button class="active" onclick="showView(0,this)">PROXY</button>
+<button onclick="showView(1,this)">REFERENCE</button>
+<button onclick="showView(2,this)">INPUT</button>
+<button onclick="showView(3,this)">OUTPUT</button>
+<button onclick="showView(4,this)">Per-frame metrics</button>
+<button onclick="showView(5,this)">JSON</button></nav>
 <section class="view active">{plots[0]}</section>
 <section class="view">{plots[1]}</section><section class="view">{plots[2]}</section>
+<section class="view">{plots[3]}</section>
 <section class="view"><h2>Per-frame recovery</h2><table><thead><tr>
-<th>Frame</th><th>Phase</th><th>Input XY</th><th>Output XY</th>
-<th>Input yaw</th><th>Output yaw</th><th>Status</th></tr></thead>
+<th>Frame</th><th>Phase</th><th>Input XY</th><th>Proxy XY</th><th>Equiv XY</th>
+<th>Input yaw</th><th>Proxy yaw</th><th>Equiv yaw</th><th>Status</th></tr></thead>
 <tbody>{rows}</tbody></table></section>
 <section class="view"><pre>{html_module.escape(json.dumps(metrics, indent=2, sort_keys=True))}</pre></section>
 </main><script>function showView(index,button){{document.querySelectorAll('.view').forEach(
@@ -490,8 +536,9 @@ flex-wrap:wrap;color:#cbd5e1;font-size:13px}} dialog{{width:min(1500px,96vw);hei
 padding:0;border:1px solid #475569;background:#111827}} iframe{{width:100%;height:calc(94vh - 46px);
 border:0}} .dialog-head{{height:46px;padding:8px 12px;display:flex;justify-content:space-between}}
 </style></head><body><header><h1>{html_module.escape(title)}</h1>
-<p class="warning">Known-error Stage 3 diagnostic. REFERENCE is a frozen model-track proxy,
-not annotation gold; its poses are not an algorithm input.</p><nav>{"".join(buttons)}</nav></header>
+<p class="warning">Known-error Stage 3 diagnostic. PROXY is not annotation gold;
+REFERENCE is the same algorithm's unperturbed output. Neither is an input to the
+perturbed run.</p><nav>{"".join(buttons)}</nav></header>
 <main>{"".join(panels)}</main><dialog id="detail"><div class="dialog-head"><b id="detail-title">
 Recovery</b><button onclick="closeDetail()">Close</button></div><iframe id="detail-frame"></iframe>
 </dialog><script>function showCase(i,b){{document.querySelectorAll('.case-panel').forEach(
@@ -511,13 +558,15 @@ def _recovery_suite_card(value: object) -> str:
     if not isinstance(profile, dict) or not isinstance(metrics, dict):
         raise ValueError("recovery suite row is missing profile or metrics")
     name = str(profile["name"])
+    variant = str(value["algorithm_variant"])
     preview = html_module.escape(str(value["preview_path"]), quote=True)
-    title = f"{value['case_id']} · {name}"
+    title = f"{value['case_id']} · {variant} · {name}"
     return (
         '<article class="card" '
         f'onclick="openDetail({html_module.escape(json.dumps(preview), quote=True)},'
         f'{html_module.escape(json.dumps(title), quote=True)})">'
-        f'<div class="head"><div><b>{html_module.escape(name.upper())}</b><br>'
+        f'<div class="head"><div><b>{html_module.escape(variant)}</b><br>'
+        f"<span>{html_module.escape(name.upper())}</span><br>"
         f'<span class="badge">up to {float(profile["maximum_translation_m"]):.2f} m / '
         f"{float(profile['maximum_yaw_deg']):.1f}°</span></div>"
         f"<span>{int(value['perturbed_frame_count'])} perturbed geometry frames</span></div>"
@@ -525,11 +574,13 @@ def _recovery_suite_card(value: object) -> str:
         f'<img src="{html_module.escape(str(value["comparison_top_path"]), quote=True)}">'
         f'<img src="{html_module.escape(str(value["comparison_side_path"]), quote=True)}">'
         '</div><div class="metrics">'
-        f"<span>XY RMS {float(metrics['input_translation_rms_m']):.3f} → "
-        f"{float(metrics['output_translation_rms_m']):.3f} m "
-        f"({float(metrics['translation_rms_reduction_fraction']):+.1%})</span>"
-        f"<span>Yaw RMS {float(metrics['input_yaw_rms_deg']):.2f} → "
-        f"{float(metrics['output_yaw_rms_deg']):.2f}° "
-        f"({float(metrics['yaw_rms_reduction_fraction']):+.1%})</span>"
+        f"<span>Equiv XY {float(metrics['input_translation_rms_m']):.3f} → "
+        f"{float(metrics['equivariant_output_translation_rms_m']):.3f} m "
+        f"({float(metrics['equivariant_translation_rms_reduction_fraction']):+.1%})</span>"
+        f"<span>Equiv yaw {float(metrics['input_yaw_rms_deg']):.2f} → "
+        f"{float(metrics['equivariant_output_yaw_rms_deg']):.2f}° "
+        f"({float(metrics['equivariant_yaw_rms_reduction_fraction']):+.1%})</span>"
+        f"<span>Proxy XY/yaw {float(metrics['output_translation_rms_m']):.3f} m / "
+        f"{float(metrics['output_yaw_rms_deg']):.2f}°</span>"
         f"<span>registered {int(metrics['registered_frame_count'])}</span></div></article>"
     )
