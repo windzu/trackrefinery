@@ -52,6 +52,7 @@ def test_review_bundle_contains_reproducible_and_interactive_views(
         "aggregate.npz",
         "bundle.json",
         "gold_aggregate.npz",
+        "input_track_aggregate.npz",
         "metrics.json",
         "preview.html",
         "result.json",
@@ -64,18 +65,25 @@ def test_review_bundle_contains_reproducible_and_interactive_views(
     manifest = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
     assert manifest["contract_version"] == "trackrefinery-review-bundle-v1"
     assert manifest["has_evidence_trace"] is False
+    assert manifest["has_input_track_comparison"] is True
+    assert manifest["input_track_aggregate_path"] == "input_track_aggregate.npz"
     assert manifest["has_gold_aligned_aggregate"] is True
     assert manifest["gold_aggregate_path"] == "gold_aggregate.npz"
     with np.load(bundle / "gold_aggregate.npz", allow_pickle=False) as archive:
         assert archive["points_xyz"].shape[1] == 3
         assert len(archive["points_xyz"]) == aggregate_point_count
+    with np.load(bundle / "input_track_aggregate.npz", allow_pickle=False) as archive:
+        assert len(archive["points_xyz"]) == aggregate_point_count
     html = (bundle / "preview.html").read_text(encoding="utf-8")
-    assert "Algorithm aggregate" in html
+    assert "Alignment A/B" in html
+    assert "Same selected point indices" in html
     assert "Annotation aggregate" in html
     assert "Annotation-pose-aligned aggregate (review only)" in html
     assert "onclick=\"showView('annotation', this)\"" in html
     assert "Reviewer feedback" in html
     assert (bundle / "thumbnails" / "aggregate_top.png").is_file()
+    assert (bundle / "thumbnails" / "alignment_comparison_top.png").is_file()
+    assert (bundle / "thumbnails" / "alignment_comparison_side.png").is_file()
     assert (bundle / "thumbnails" / "gold_aggregate_top.png").is_file()
 
 
@@ -96,6 +104,7 @@ def test_review_bundle_renders_algorithm_evidence_trace(tmp_path: Path) -> None:
     manifest = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
     assert manifest["has_evidence_trace"] is True
     assert manifest["has_registration_trace"] is True
+    assert manifest["has_input_track_comparison"] is True
     assert manifest["has_cuboid_candidate"] is True
     assert manifest["data_source"] == "synthetic-v1 deterministic fixture"
     assert manifest["has_gold_aligned_aggregate"] is False
@@ -104,6 +113,14 @@ def test_review_bundle_renders_algorithm_evidence_trace(tmp_path: Path) -> None:
     assert (bundle / "canonical_shape.npz").is_file()
     assert (bundle / "thumbnails" / "aggregate_evidence_top.png").is_file()
     assert (bundle / "thumbnails" / "canonical_registration_top.png").is_file()
+    assert (bundle / "thumbnails" / "alignment_comparison_top.png").is_file()
+    assert (bundle / "thumbnails" / "alignment_comparison_side.png").is_file()
+    with (
+        np.load(bundle / "input_track_aggregate.npz", allow_pickle=False) as before,
+        np.load(bundle / "aggregate.npz", allow_pickle=False) as after,
+    ):
+        np.testing.assert_array_equal(before["frame_index"], after["frame_index"])
+        assert len(before["points_xyz"]) == len(after["points_xyz"])
     with np.load(bundle / "aggregate.npz", allow_pickle=False) as archive:
         assert archive["evidence_state"].shape == (len(archive["points_xyz"]),)
         assert len(archive["points_xyz"]) <= len(case.frames) * 300
@@ -139,6 +156,8 @@ def test_catalog_review_bundle_is_lightweight_and_explicitly_baseline(
     manifest = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
     assert manifest["detail_level"] == "catalog"
     assert manifest["review_mode"] == "model_candidate_baseline"
+    assert manifest["has_input_track_comparison"] is False
+    assert manifest["input_track_aggregate_path"] is None
     assert (bundle / "thumbnails" / "aggregate_top.png").is_file()
     assert (bundle / "thumbnails" / "aggregate_side.png").is_file()
     assert not (bundle / "thumbnails" / "aggregate_front.png").exists()
@@ -280,6 +299,8 @@ def test_clip_review_suite_groups_instances_as_cards_under_clip_tabs(
         "algorithm_candidate"
     )
     assert manifest["clips"][0]["instances"][0]["canonical_top_path"]
+    assert manifest["clips"][0]["instances"][0]["alignment_comparison_top_path"]
+    assert manifest["clips"][0]["instances"][0]["alignment_comparison_side_path"]
     html = (output / "index.html").read_text(encoding="utf-8")
     assert html.count('<button class="clip-tab') == 2
     assert html.count('<article class="instance-card ') == 3
@@ -289,6 +310,7 @@ def test_clip_review_suite_groups_instances_as_cards_under_clip_tabs(
     assert "ANNOTATION REFERENCE" in html
     assert 'data-review-mode="source_annotation_reference"' in html
     assert "REFINEMENT NOT RUN" in html
+    assert "Same-instance A/B · TOP · identical points and axes" in html
 
     status = build_clip_review_suite_main(
         [
