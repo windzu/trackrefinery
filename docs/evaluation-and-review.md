@@ -159,9 +159,25 @@ bundle names its data source so a generated fixture cannot be mistaken for a
 real Clip. Candidate geometry is visibly marked as not released until the
 success gate exists.
 
-Complete regression runs additionally contain `suite.json` and `index.html`.
-The index exposes every case as a top-level tab, while each case has separate
-tabs for algorithm aggregate, annotation aggregate, canonical shape, current
-evidence, per-frame results, metrics, and diagnostics. A failed or
-insufficient-evidence case remains visible; suite generation must not select
-only favorable examples.
+Complete synthetic regression runs additionally contain `suite.json` and
+`index.html`. Their index exposes every case as a top-level tab, while each
+case has separate tabs for algorithm aggregate, annotation aggregate,
+canonical shape, current evidence, per-frame results, metrics, and
+diagnostics. A failed or insufficient-evidence case remains visible; suite
+generation must not select only favorable examples.
+
+Real development review uses a different Clip-level catalog contract,
+`trackrefinery-clip-review-suite-v1`. Each top-level tab is exactly one source
+Clip, and that tab tiles every instance bundle from the Clip. Cards are ordered
+by observation count and show fixed top/side aggregate views; selecting a card
+opens its instance detail bundle. The catalog must not create one outer tab per
+instance or hide short, failed, unsupported, or insufficient-evidence tracks.
+
+Catalog cards name their alignment source. A frozen model track may be shown
+as a coarse-track baseline before refinement. Current source annotations may
+be shown as an annotation-aligned reference, but are explicitly marked as not
+reviewed gold and must not be passed to the refiner. Only a separately reviewed
+target may be called gold or used for quantitative evaluation. A lightweight
+`catalog` detail level writes fixed aggregate artifacts and a static detail
+page for exhaustive inventory; selected algorithm cases retain the full
+interactive bundle.

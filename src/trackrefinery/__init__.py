@@ -1,5 +1,6 @@
 """Public API for single-instance, multi-frame 3D refinement."""
 
+from trackrefinery.adapters import X4DInferenceExport, export_x4d_clip_inference
 from trackrefinery.contracts import (
     Box3D,
     FrameCloud,
@@ -46,7 +47,11 @@ from trackrefinery.geometric import (
     write_geometric_trace,
 )
 from trackrefinery.refiner import TrackRefiner, validate_outcome
-from trackrefinery.review import build_review_bundle, build_review_suite
+from trackrefinery.review import (
+    build_clip_review_suite,
+    build_review_bundle,
+    build_review_suite,
+)
 from trackrefinery.serde import read_outcome, write_outcome
 from trackrefinery.targets import GoldFramePose, GoldTarget, TargetDataset
 
@@ -86,10 +91,13 @@ __all__ = [
     "TargetDataset",
     "TrackObservation",
     "TrackRefiner",
+    "X4DInferenceExport",
+    "build_clip_review_suite",
     "build_review_bundle",
     "build_review_suite",
     "evaluate_case",
     "evaluate_suite",
+    "export_x4d_clip_inference",
     "fit_alternating_envelope",
     "read_geometric_trace",
     "read_outcome",

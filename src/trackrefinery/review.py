@@ -6,6 +6,7 @@ import html as html_module
 import json
 import threading
 import webbrowser
+from collections.abc import Mapping, Sequence
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -49,6 +50,15 @@ EVIDENCE_COLORS = {
     EvidenceState.GROUND: "#8d6e63",
 }
 
+REVIEW_MODES = frozenset(
+    {
+        "algorithm_candidate",
+        "model_candidate_baseline",
+        "source_annotation_reference",
+    }
+)
+REVIEW_DETAIL_LEVELS = frozenset({"catalog", "full"})
+
 
 def build_review_bundle(
     case: RefinementCase,
@@ -59,6 +69,8 @@ def build_review_bundle(
     evaluation: EvaluationReport | None = None,
     trace: GeometricRefinementTrace | None = None,
     data_source: str = "not declared",
+    review_mode: str = "algorithm_candidate",
+    detail_level: str = "full",
     crop_scale: float = 1.8,
     max_points_per_frame: int = 8_000,
 ) -> Path:
@@ -78,6 +90,10 @@ def build_review_bundle(
     if not isinstance(data_source, str) or not data_source.strip():
         raise ValueError("data_source must be a non-empty string")
     data_source = data_source.strip()
+    if review_mode not in REVIEW_MODES:
+        raise ValueError(f"review_mode must be one of {sorted(REVIEW_MODES)}")
+    if detail_level not in REVIEW_DETAIL_LEVELS:
+        raise ValueError(f"detail_level must be one of {sorted(REVIEW_DETAIL_LEVELS)}")
 
     output = Path(output_dir).resolve()
     thumbnails = output / "thumbnails"
@@ -263,8 +279,14 @@ def build_review_bundle(
         "contract_version": "trackrefinery-review-bundle-v1",
         "case_id": case.case_id,
         "track_id": case.track.track_id,
+        "sequence_id": case.track.sequence_id,
+        "category": case.track.category,
+        "frame_count": len(case.frames),
+        "aggregate_point_count": len(aggregate),
         "outcome_status": outcome.status,
         "data_source": data_source,
+        "review_mode": review_mode,
+        "detail_level": detail_level,
         "frame_ids": [frame.frame_id for frame in case.frames],
         "crop_scale": crop_scale,
         "max_points_per_frame": max_points_per_frame,
@@ -293,36 +315,310 @@ def build_review_bundle(
         encoding="utf-8",
     )
 
-    _write_thumbnails(
-        thumbnails,
-        aggregate,
-        aggregate_frame_index,
-        gold_aggregate,
-        gold_aggregate_frame_index,
-        aggregate_evidence_state,
-        preview_frames,
-        outcome,
-        target,
-        evaluation,
-        canonical_shape,
-        cuboid_fit,
+    if detail_level == "catalog":
+        _write_catalog_thumbnails(
+            thumbnails,
+            aggregate,
+            aggregate_frame_index,
+            preview_frames,
+            outcome,
+            cuboid_fit,
+        )
+        _write_catalog_html(
+            output / "preview.html",
+            case,
+            outcome,
+            data_source,
+            review_mode,
+        )
+    else:
+        _write_thumbnails(
+            thumbnails,
+            aggregate,
+            aggregate_frame_index,
+            gold_aggregate,
+            gold_aggregate_frame_index,
+            aggregate_evidence_state,
+            preview_frames,
+            outcome,
+            target,
+            evaluation,
+            canonical_shape,
+            cuboid_fit,
+        )
+        _write_html(
+            output / "preview.html",
+            case,
+            outcome,
+            aggregate,
+            aggregate_frame_index,
+            gold_aggregate,
+            gold_aggregate_frame_index,
+            aggregate_evidence_state,
+            preview_frames,
+            target,
+            evaluation,
+            trace,
+            data_source,
+            review_mode,
+        )
+    return output
+
+
+def build_clip_review_suite(
+    output_dir: str | Path,
+    clips: Mapping[str, Sequence[str | Path]],
+    *,
+    title: str = "TrackRefinery real Clip review",
+) -> Path:
+    """Tile single-instance bundles under one top-level tab per source Clip."""
+
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("title must be a non-empty string")
+    if not clips:
+        raise ValueError("clip review suite requires at least one Clip")
+    output = Path(output_dir).resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    clip_rows: list[dict[str, object]] = []
+    seen_case_ids: set[str] = set()
+    for clip_id, bundle_dirs in clips.items():
+        if not isinstance(clip_id, str) or not clip_id.strip():
+            raise ValueError("clip_id must be a non-empty string")
+        instances = [
+            _review_bundle_index_row(output, bundle_dir, seen_case_ids)
+            for bundle_dir in bundle_dirs
+        ]
+        if not instances:
+            raise ValueError(f"Clip {clip_id!r} requires at least one instance")
+        instances.sort(
+            key=lambda row: (
+                -int(row.get("frame_count") or 0),
+                str(row.get("category") or ""),
+                str(row["case_id"]),
+            )
+        )
+        clip_rows.append(
+            {
+                "clip_id": clip_id.strip(),
+                "instance_count": len(instances),
+                "instances": instances,
+            }
+        )
+
+    suite_manifest = {
+        "contract_version": "trackrefinery-clip-review-suite-v1",
+        "title": title.strip(),
+        "clips": clip_rows,
+    }
+    (output / "clip-suite.json").write_text(
+        json.dumps(suite_manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
-    _write_html(
-        output / "preview.html",
-        case,
-        outcome,
-        aggregate,
-        aggregate_frame_index,
-        gold_aggregate,
-        gold_aggregate_frame_index,
-        aggregate_evidence_state,
-        preview_frames,
-        target,
-        evaluation,
-        trace,
-        data_source,
+    (output / "index.html").write_text(
+        _clip_suite_html(title.strip(), clip_rows), encoding="utf-8"
     )
     return output
+
+
+def _review_bundle_index_row(
+    output: Path,
+    bundle_dir: str | Path,
+    seen_case_ids: set[str],
+) -> dict[str, object]:
+    bundle = Path(bundle_dir).resolve()
+    try:
+        relative = bundle.relative_to(output)
+    except ValueError as error:
+        raise ValueError("review suite bundles must be inside output_dir") from error
+    preview = bundle / "preview.html"
+    manifest_path = bundle / "bundle.json"
+    top = bundle / "thumbnails" / "aggregate_top.png"
+    side = bundle / "thumbnails" / "aggregate_side.png"
+    if not all(path.is_file() for path in (preview, manifest_path, top, side)):
+        raise ValueError(f"{bundle} is not a complete review bundle")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError(f"{manifest_path} must contain an object")
+    case_id = manifest.get("case_id")
+    if not isinstance(case_id, str) or not case_id:
+        raise ValueError(f"{manifest_path} has no case_id")
+    if case_id in seen_case_ids:
+        raise ValueError(f"duplicate review case_id: {case_id}")
+    seen_case_ids.add(case_id)
+    canonical_top = bundle / "thumbnails" / "canonical_registration_top.png"
+    review_mode = manifest.get("review_mode", "algorithm_candidate")
+    if canonical_top.is_file():
+        top_path = canonical_top
+        top_label = "Canonical registered aggregate"
+    elif review_mode == "source_annotation_reference":
+        top_path = top
+        top_label = "Annotation-aligned aggregate"
+    else:
+        top_path = top
+        top_label = "Coarse-track-aligned aggregate"
+    return {
+        "case_id": case_id,
+        "track_id": manifest.get("track_id"),
+        "category": manifest.get("category"),
+        "frame_count": manifest.get("frame_count"),
+        "aggregate_point_count": manifest.get("aggregate_point_count"),
+        "outcome_status": manifest.get("outcome_status"),
+        "review_mode": review_mode,
+        "detail_level": manifest.get("detail_level", "full"),
+        "has_gold_aligned_aggregate": manifest.get("has_gold_aligned_aggregate", False),
+        "cuboid_candidate_size_lwh": manifest.get("cuboid_candidate_size_lwh"),
+        "preview_path": (relative / "preview.html").as_posix(),
+        "aggregate_top_path": top_path.relative_to(output).as_posix(),
+        "aggregate_top_label": top_label,
+        "aggregate_side_path": (
+            relative / "thumbnails" / "aggregate_side.png"
+        ).as_posix(),
+    }
+
+
+def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
+    buttons: list[str] = []
+    panels: list[str] = []
+    for clip_index, clip in enumerate(clips):
+        clip_id = str(clip["clip_id"])
+        instances = clip["instances"]
+        if not isinstance(instances, list):
+            raise ValueError("Clip instances must be a list")
+        active = " active" if clip_index == 0 else ""
+        buttons.append(
+            f'<button class="clip-tab{active}" '
+            f'onclick="showClip({clip_index}, this)">'
+            f"{html_module.escape(clip_id)}"
+            f"<small>{len(instances)} instances</small></button>"
+        )
+        cards = [_clip_instance_card(instance) for instance in instances]
+        panels.append(
+            f'<section id="clip-{clip_index}" class="clip-panel{active}">'
+            f'<div class="clip-summary"><strong>{html_module.escape(clip_id)}</strong>'
+            f"<span>{len(instances)} / {len(instances)} instances shown</span></div>"
+            f'<div class="instance-grid">{"".join(cards)}</div></section>'
+        )
+    title_display = html_module.escape(title)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{title_display}</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ font-family: system-ui; margin: 0; background: #0b1120; color: #e5e7eb; }}
+    header {{ position: sticky; top: 0; z-index: 5; padding: 14px 18px 8px;
+      background: rgba(11,17,32,.97); border-bottom: 1px solid #263349; }}
+    h1 {{ margin: 0 0 12px; font-size: 22px; }}
+    nav {{ display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }}
+    .clip-tab {{ flex: 0 0 auto; min-width: 220px; padding: 9px 12px;
+      border: 1px solid #475569; border-radius: 8px; background: #172033;
+      color: #e5e7eb; cursor: pointer; text-align: left; }}
+    .clip-tab small, .instance-head small {{ display: block; color: #94a3b8;
+      margin-top: 3px; overflow: hidden; text-overflow: ellipsis; }}
+    .clip-tab.active {{ background: #1d4ed8; border-color: #60a5fa; }}
+    main {{ padding: 16px 18px 32px; }}
+    .clip-panel {{ display: none; }} .clip-panel.active {{ display: block; }}
+    .clip-summary {{ display: flex; justify-content: space-between; gap: 12px;
+      margin-bottom: 14px; color: #cbd5e1; }}
+    .instance-grid {{ display: grid; grid-template-columns:
+      repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; }}
+    .instance-card {{ overflow: hidden; border: 1px solid #334155;
+      border-radius: 12px; background: #111827; cursor: pointer; padding: 12px; }}
+    .instance-card:hover {{ border-color: #60a5fa; transform: translateY(-1px); }}
+    .instance-head {{ display: flex; justify-content: space-between; gap: 12px;
+      margin-bottom: 8px; }}
+    .status {{ color: #bfdbfe; font-size: 12px; }}
+    .views {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }}
+    figure {{ margin: 0; background: white; border-radius: 7px; overflow: hidden; }}
+    img {{ display: block; width: 100%; aspect-ratio: 8/5; object-fit: contain; }}
+    figcaption {{ color: #334155; font-size: 11px; padding: 3px 7px 5px; }}
+    .instance-card p {{ margin: 7px 0 0; color: #94a3b8; font-size: 12px; }}
+    .instance-card .mode {{ color: #fbbf24; }}
+    dialog {{ width: min(1500px, 96vw); height: 94vh; padding: 0;
+      border: 1px solid #475569; border-radius: 10px; background: #111827; }}
+    dialog::backdrop {{ background: rgba(0,0,0,.75); }}
+    .dialog-head {{ display: flex; justify-content: space-between; align-items: center;
+      height: 48px; padding: 0 14px; color: #e5e7eb; }}
+    .dialog-head button {{ padding: 6px 12px; }}
+    iframe {{ width: 100%; height: calc(94vh - 48px); border: 0; background: #111827; }}
+  </style>
+</head>
+<body>
+  <header><h1>{title_display}</h1><nav>{"".join(buttons)}</nav></header>
+  <main>{"".join(panels)}</main>
+  <dialog id="instance-dialog"><div class="dialog-head">
+    <strong id="dialog-title">Instance</strong>
+    <button onclick="closeInstance()">Close</button></div>
+    <iframe id="instance-frame" title="Instance review"></iframe></dialog>
+  <script>
+  function showClip(index, button) {{
+    document.querySelectorAll('.clip-panel').forEach(
+      element => element.classList.remove('active'));
+    document.querySelectorAll('.clip-tab').forEach(
+      element => element.classList.remove('active'));
+    document.getElementById('clip-' + index).classList.add('active');
+    button.classList.add('active');
+  }}
+  function openInstance(path, caseId) {{
+    document.getElementById('dialog-title').textContent = caseId;
+    document.getElementById('instance-frame').src = path;
+    document.getElementById('instance-dialog').showModal();
+  }}
+  function closeInstance() {{
+    document.getElementById('instance-dialog').close();
+    document.getElementById('instance-frame').src = 'about:blank';
+  }}
+  </script>
+</body>
+</html>"""
+
+
+def _clip_instance_card(instance: object) -> str:
+    if not isinstance(instance, dict):
+        raise ValueError("instance index row must be an object")
+    case_id = str(instance["case_id"])
+    track_id = str(instance.get("track_id") or "unknown")
+    category = str(instance.get("category") or "unknown")
+    frame_count = html_module.escape(str(instance.get("frame_count") or "?"))
+    point_count = html_module.escape(str(instance.get("aggregate_point_count") or "?"))
+    status = str(instance.get("outcome_status") or "unknown")
+    mode = str(instance.get("review_mode") or "algorithm_candidate")
+    if mode == "source_annotation_reference":
+        mode_label = "source annotation reference · not gold · not refined"
+    elif mode == "model_candidate_baseline":
+        mode_label = "model track baseline · refinement not run"
+    else:
+        mode_label = "model track · TrackRefinery development result"
+    candidate = instance.get("cuboid_candidate_size_lwh")
+    size_label = "no candidate size"
+    if isinstance(candidate, (list, tuple)) and len(candidate) == 3:
+        size_label = " x ".join(f"{float(value):.2f}" for value in candidate)
+        size_label += " m"
+    preview = html_module.escape(str(instance["preview_path"]), quote=True)
+    top = html_module.escape(str(instance["aggregate_top_path"]), quote=True)
+    side = html_module.escape(str(instance["aggregate_side_path"]), quote=True)
+    top_label = html_module.escape(
+        str(instance.get("aggregate_top_label") or "Top aggregate")
+    )
+    return (
+        '<article class="instance-card" '
+        f'onclick="openInstance({html_module.escape(json.dumps(preview), quote=True)}, '
+        f'{html_module.escape(json.dumps(case_id), quote=True)})">'
+        '<div class="instance-head">'
+        f"<div><strong>{html_module.escape(category)}</strong>"
+        f"<small>{html_module.escape(track_id)}</small></div>"
+        f'<span class="status">{html_module.escape(status)}</span></div>'
+        '<div class="views">'
+        f'<figure><img loading="lazy" src="{top}" alt="{top_label}">'
+        f"<figcaption>{top_label}</figcaption></figure>"
+        f'<figure><img loading="lazy" src="{side}" alt="Side aggregate">'
+        "<figcaption>Side aggregate</figcaption></figure></div>"
+        f'<p class="mode">{html_module.escape(mode_label)}</p>'
+        f"<p>{frame_count} frames · {point_count} displayed points</p>"
+        f"<p>{html_module.escape(size_label)}</p></article>"
+    )
 
 
 def build_review_suite(
@@ -530,6 +826,126 @@ def _trace_preview_positions(
         selected = np.linspace(0, len(positions) - 1, maximum, dtype=np.int64)
         positions = positions[selected]
     return positions.astype(np.int64, copy=False)
+
+
+def _write_catalog_thumbnails(
+    output: Path,
+    aggregate: NDArray[np.float32],
+    frame_index: NDArray[np.int16],
+    preview_frames: list[dict[str, object]],
+    outcome: RefinementOutcome,
+    cuboid_fit: CuboidFitTrace | None,
+) -> None:
+    """Render only the two fixed views needed by the all-instance catalog."""
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as error:
+        raise RuntimeError(
+            "review bundle rendering requires 'pip install trackrefinery[review]'"
+        ) from error
+    size, result_label, result_color = _review_display_geometry(
+        preview_frames, outcome, cuboid_fit
+    )
+    for name, first, second, x_label, y_label in (
+        ("aggregate_top.png", 0, 1, "X (m)", "Y (m)"),
+        ("aggregate_side.png", 0, 2, "X (m)", "Z (m)"),
+    ):
+        figure, axis = plt.subplots(figsize=(5.2, 3.4), constrained_layout=True)
+        axis.scatter(
+            aggregate[:, first],
+            aggregate[:, second],
+            c=frame_index,
+            s=0.8,
+            cmap="turbo",
+            alpha=0.58,
+        )
+        _plot_box_projection(
+            axis,
+            Box3D((0.0, 0.0, 0.0), size, (0.0, 0.0, 0.0, 1.0)),
+            first,
+            second,
+            result_color,
+            result_label,
+        )
+        axis.set_xlabel(x_label)
+        axis.set_ylabel(y_label)
+        axis.set_aspect("equal", adjustable="box")
+        axis.legend(loc="best", fontsize=7)
+        figure.savefig(output / name, dpi=110)
+        plt.close(figure)
+
+
+def _review_display_geometry(
+    preview_frames: list[dict[str, object]],
+    outcome: RefinementOutcome,
+    cuboid_fit: CuboidFitTrace | None,
+) -> tuple[tuple[float, float, float], str, str]:
+    if isinstance(outcome, RefinementSuccess):
+        return outcome.canonical_size_lwh, "result", "#00c853"
+    if (
+        cuboid_fit is not None
+        and cuboid_fit.status == "candidate"
+        and cuboid_fit.canonical_size_lwh is not None
+    ):
+        return cuboid_fit.canonical_size_lwh, "cuboid candidate", "#d500f9"
+    coarse_size = tuple(
+        np.median(
+            [
+                item["coarse_box"].size_lwh
+                for item in preview_frames
+                if isinstance(item["coarse_box"], Box3D)
+            ],
+            axis=0,
+        )
+    )
+    return coarse_size, "input box", "#7c4dff"
+
+
+def _write_catalog_html(
+    path: Path,
+    case: RefinementCase,
+    outcome: RefinementOutcome,
+    data_source: str,
+    review_mode: str,
+) -> None:
+    mode_label = {
+        "algorithm_candidate": "TrackRefinery development result",
+        "model_candidate_baseline": "Model candidate baseline; refinement not run",
+        "source_annotation_reference": (
+            "Source annotation reference; not reviewed gold; refinement not run"
+        ),
+    }[review_mode]
+    path.write_text(
+        f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html_module.escape(case.case_id)}</title>
+<style>
+body {{ font-family: system-ui; margin: 0; background: #111827; color: #e5e7eb; }}
+main {{ max-width: 1400px; margin: auto; padding: 18px; }}
+.views {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
+figure {{ margin: 0; padding: 8px; border-radius: 10px;
+  background: white; color: #111827; }}
+img {{ width: 100%; display: block; }}
+.notice {{ color: #fbbf24; }}
+</style></head><body><main>
+<h1>{html_module.escape(case.case_id)}</h1>
+<p>{html_module.escape(case.track.category or "unknown")} · {len(case.frames)} frames ·
+{html_module.escape(outcome.status)}</p>
+<p class="notice">{html_module.escape(mode_label)}</p>
+<p>Data source: {html_module.escape(data_source)}</p>
+<div class="views">
+<figure><img src="thumbnails/aggregate_top.png">
+<figcaption>Top aggregate</figcaption></figure>
+<figure><img src="thumbnails/aggregate_side.png">
+<figcaption>Side aggregate</figcaption></figure>
+</div></main></body></html>""",
+        encoding="utf-8",
+    )
 
 
 def _write_thumbnails(
@@ -823,6 +1239,7 @@ def _write_html(
     evaluation: EvaluationReport | None,
     trace: GeometricRefinementTrace | None,
     data_source: str,
+    review_mode: str,
 ) -> None:
     try:
         import plotly.graph_objects as go
@@ -888,8 +1305,13 @@ def _write_html(
             "gold size",
             "#00b8d4",
         )
+    aggregate_title = (
+        "Source-annotation-aligned aggregate (reference only; not gold)"
+        if review_mode == "source_annotation_reference"
+        else "Algorithm-candidate-aligned aggregate (points colored by frame)"
+    )
     aggregate_figure.update_layout(
-        title="Algorithm-candidate-aligned aggregate (points colored by frame)",
+        title=aggregate_title,
         scene={"aspectmode": "data"},
         margin={"l": 0, "r": 0, "t": 45, "b": 0},
     )
@@ -1102,6 +1524,7 @@ def _write_html(
     case_display = html_module.escape(case.case_id)
     track_display = html_module.escape(case.track.track_id)
     source_display = html_module.escape(data_source)
+    review_mode_display = html_module.escape(review_mode)
     candidate_display = (
         "none"
         if trace is None
@@ -1178,6 +1601,7 @@ def _write_html(
   <h1>{case_display}</h1>
   <p>Track {track_display} · {outcome.status}</p>
   <p><strong>Data source:</strong> {source_display}</p>
+  <p><strong>Review mode:</strong> {review_mode_display}</p>
   <p><strong>Trace-only cuboid candidate:</strong> {candidate_display}</p>
   <nav class="view-tabs">{view_buttons}</nav>
   {view_panels}

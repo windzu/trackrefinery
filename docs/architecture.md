@@ -85,5 +85,16 @@ They must be named explicitly and must not weaken the V1 success semantics.
 
 MMDetection3D may call TrackRefinery once per associated track while reusing its
 already loaded full-frame point tensors. X-4D continues to supply and receive a
-complete Clip through the existing preannotation protocol. TrackRefinery itself
-must not import either project or introduce a second X-4D service protocol.
+complete Clip through the existing preannotation protocol. The core package
+does not import either project and never introduces a second X-4D service
+protocol.
+
+The optional `trackrefinery.adapters.x4d` development adapter may depend on the
+published Devkit. It resolves every metadata-declared current-keyframe LiDAR
+channel, transforms points into the Clip's annotation frame, preserves exact
+point time and sensor provenance, and freezes the result into the portable
+source-only inference layout. The export process may read a frozen candidate
+or a review-only annotation reference to construct coarse track files, but the
+algorithm process opens only the exported inference root. This two-step path
+keeps native annotations and evaluation targets out of the refiner even when a
+locally synchronized Clip physically contains them.

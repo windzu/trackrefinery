@@ -32,6 +32,9 @@ review = [
   "matplotlib>=3.8",
   "plotly>=5.24",
 ]
+x4d = [
+  "x4d-devkit>=0.36.0rc1,<0.37",
+]
 dev = [
   "build>=1.2",
   "matplotlib>=3.8",
@@ -50,6 +53,8 @@ trackrefinery-evaluate = "trackrefinery.cli:evaluate_main"
 trackrefinery-evaluate-suite = "trackrefinery.cli:evaluate_suite_main"
 trackrefinery-build-review = "trackrefinery.cli:build_review_main"
 trackrefinery-build-review-suite = "trackrefinery.cli:build_review_suite_main"
+trackrefinery-build-clip-review-suite = "trackrefinery.cli:build_clip_review_suite_main"
+trackrefinery-export-x4d = "trackrefinery.cli:export_x4d_main"
 trackrefinery-review = "trackrefinery.cli:review_main"
 
 [project.urls]

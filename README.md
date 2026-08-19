@@ -39,6 +39,8 @@ python -m pip install .
 python -m pip install '.[geometric]'
 # Include visual review generation:
 python -m pip install '.[geometric,review]'
+# Include the optional X-4D Dataset 0.17 development adapter:
+python -m pip install '.[geometric,review,x4d]'
 ```
 
 ```python
@@ -69,14 +71,17 @@ build_review_bundle(
 ```
 
 Multiple case bundles can be placed under one directory and exposed through a
-single tabbed review page with `build_review_suite()`. When a physically
+single tabbed review page with `build_review_suite()`. Real-data catalogs use
+`build_clip_review_suite()` so each outer tab is one Clip and all of its
+instances are tiled inside the tab. When a physically
 separate gold target is supplied, each case also contains an annotation-pose-
 aligned aggregate for review-only comparison; it is never exposed to the
 refinement backend.
 
 The base package depends only on NumPy. Registration uses SciPy through the
-`geometric` extra, while review rendering uses the `review` extra. Importing
-the core contracts does not require SciPy, Plotly, or Matplotlib.
+`geometric` extra, review rendering uses the `review` extra, and the Dataset
+0.17 adapter uses the `x4d` extra. Importing the core contracts does not require
+SciPy, Plotly, Matplotlib, or X-4D.
 
 ## Quick start
 
@@ -109,7 +114,8 @@ are summarized in the [Python API guide](docs/python-api.md).
 - sensor calibration or coordinate fusion;
 - Clip-level multi-object orchestration and annotation release policy;
 - an annotation UI;
-- direct dependencies on X-4D, MMDetection3D, or a proprietary dataset.
+- core/runtime coupling to X-4D, MMDetection3D, or a proprietary dataset;
+  ecosystem-specific development adapters remain optional.
 
 ## License
 
