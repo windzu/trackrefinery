@@ -74,12 +74,15 @@ def test_review_bundle_renders_algorithm_evidence_trace(tmp_path: Path) -> None:
         run.outcome,
         tmp_path / "review-trace",
         trace=run.trace,
+        data_source="synthetic-v1 deterministic fixture",
         max_points_per_frame=300,
     )
 
     manifest = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
     assert manifest["has_evidence_trace"] is True
     assert manifest["has_registration_trace"] is True
+    assert manifest["has_cuboid_candidate"] is True
+    assert manifest["data_source"] == "synthetic-v1 deterministic fixture"
     assert (bundle / "evidence_trace.json").is_file()
     assert (bundle / "evidence_masks.npz").is_file()
     assert (bundle / "canonical_shape.npz").is_file()
@@ -89,10 +92,13 @@ def test_review_bundle_renders_algorithm_evidence_trace(tmp_path: Path) -> None:
         assert archive["evidence_state"].shape == (len(archive["points_xyz"]),)
         assert len(archive["points_xyz"]) <= len(case.frames) * 300
     html = (bundle / "preview.html").read_text(encoding="utf-8")
-    assert "Initial evidence classification" in html
+    assert "Current evidence classification" in html
     assert "Evidence trace" in html
     assert "registration candidate" in html
-    assert "Provisional canonical shape (registration only)" in html
+    assert "Canonical shape after alternating registration" in html
+    assert "synthetic-v1 deterministic fixture" in html
+    assert "Trace-only cuboid candidate" in html
+    assert "cuboid candidate" in html
 
 
 def test_review_cli_accepts_portable_evidence_trace(tmp_path: Path) -> None:
@@ -114,6 +120,8 @@ def test_review_cli_accepts_portable_evidence_trace(tmp_path: Path) -> None:
             str(result_path),
             "--trace",
             str(trace_dir / "evidence_trace.json"),
+            "--data-source",
+            "synthetic-cli-fixture",
             "--output",
             str(tmp_path / "review-cli"),
         ]
@@ -121,3 +129,7 @@ def test_review_cli_accepts_portable_evidence_trace(tmp_path: Path) -> None:
 
     assert status == 0
     assert (tmp_path / "review-cli" / "evidence_masks.npz").is_file()
+    manifest = json.loads(
+        (tmp_path / "review-cli" / "bundle.json").read_text(encoding="utf-8")
+    )
+    assert manifest["data_source"] == "synthetic-cli-fixture"

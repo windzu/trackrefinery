@@ -7,6 +7,7 @@ from trackrefinery.contracts import (
     RefinementCase,
     RefinementOutcome,
 )
+from trackrefinery.geometric.envelope import fit_alternating_envelope
 from trackrefinery.geometric.evidence import select_initial_evidence
 from trackrefinery.geometric.registration import register_canonical_shape
 from trackrefinery.geometric.settings import GeometricRefinementSettings
@@ -19,7 +20,7 @@ from trackrefinery.refiner import TrackRefiner, validate_outcome
 
 
 class JointCuboidRefiner(TrackRefiner):
-    """Deterministic joint refiner, gated before cuboid envelope fitting."""
+    """Deterministic joint refiner, gated before final observability checks."""
 
     def __init__(self, settings: GeometricRefinementSettings | None = None) -> None:
         self.settings = settings or GeometricRefinementSettings()
@@ -40,7 +41,10 @@ class JointCuboidRefiner(TrackRefiner):
         self, case: RefinementCase
     ) -> tuple[RefinementOutcome, GeometricRefinementTrace]:
         initial_trace = select_initial_evidence(case, self.settings)
-        trace = register_canonical_shape(case, initial_trace, self.settings)
+        registration_trace = register_canonical_shape(
+            case, initial_trace, self.settings
+        )
+        trace = fit_alternating_envelope(case, registration_trace, self.settings)
         frame_summaries = [frame.to_summary_dict() for frame in trace.frames]
         ground_missing = [
             frame.frame_id for frame in trace.frames if frame.ground_plane is None
@@ -59,8 +63,19 @@ class JointCuboidRefiner(TrackRefiner):
             for frame in failed_registration
         ):
             reasons.append("insufficient_target_points")
-        if trace.canonical_shape is None or not trace.canonical_shape.converged:
+        if (
+            trace.canonical_shape is None
+            or not trace.canonical_shape.converged
+            or trace.cuboid_fit is None
+            or not trace.cuboid_fit.converged
+        ):
             reasons.append("optimization_not_converged")
+        if trace.cuboid_fit is not None and trace.cuboid_fit.reason_codes:
+            reasons.extend(
+                reason
+                for reason in trace.cuboid_fit.reason_codes
+                if reason not in reasons
+            )
         reasons.extend(
             f"pose_unobservable:{frame.frame_id}" for frame in failed_registration
         )
@@ -80,6 +95,9 @@ class JointCuboidRefiner(TrackRefiner):
                     None
                     if trace.canonical_shape is None
                     else trace.canonical_shape.to_summary_dict()
+                ),
+                "cuboid_fit": (
+                    None if trace.cuboid_fit is None else trace.cuboid_fit.to_dict()
                 ),
                 "frames": frame_summaries,
             },

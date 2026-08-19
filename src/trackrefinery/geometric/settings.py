@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from math import isfinite
 
 GEOMETRIC_ALGORITHM_VERSION = "joint-cuboid-refiner-v1"
-GEOMETRIC_CONFIG_SCHEMA_VERSION = "trackrefinery-geometric-settings-v2"
+GEOMETRIC_CONFIG_SCHEMA_VERSION = "trackrefinery-geometric-settings-v3"
 
 
 def _finite_triplet(
@@ -169,6 +169,59 @@ class RegistrationSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class EnvelopeFittingSettings:
+    """Visible-face fitting and alternating evidence-reassignment policy."""
+
+    maximum_alternations: int = 3
+    reassignment_support_radius_m: float = 0.13
+    reassignment_minimum_frame_support: int = 2
+    target_envelope_allowance_m: float = 0.18
+    ambiguity_envelope_allowance_m: float = 0.35
+    face_tail_fraction: float = 0.2
+    face_band_m: float = 0.06
+    minimum_face_points: int = 12
+    dimension_convergence_m: float = 0.01
+    center_convergence_m: float = 0.005
+    minimum_size_lwh_m: tuple[float, float, float] = (0.4, 0.3, 0.3)
+    maximum_size_lwh_m: tuple[float, float, float] = (25.0, 5.0, 5.0)
+
+    def __post_init__(self) -> None:
+        positive_fields = (
+            "reassignment_support_radius_m",
+            "target_envelope_allowance_m",
+            "ambiguity_envelope_allowance_m",
+            "face_band_m",
+            "dimension_convergence_m",
+            "center_convergence_m",
+        )
+        for name in positive_fields:
+            object.__setattr__(self, name, _positive(getattr(self, name), name))
+        object.__setattr__(
+            self,
+            "face_tail_fraction",
+            _fraction(self.face_tail_fraction, "face_tail_fraction"),
+        )
+        minimum = _finite_triplet(self.minimum_size_lwh_m, "minimum_size_lwh_m")
+        maximum = _finite_triplet(self.maximum_size_lwh_m, "maximum_size_lwh_m")
+        if any(value <= 0 for value in minimum):
+            raise ValueError("minimum_size_lwh_m must be positive")
+        if any(right <= left for left, right in zip(minimum, maximum, strict=True)):
+            raise ValueError("maximum_size_lwh_m must exceed minimum_size_lwh_m")
+        object.__setattr__(self, "minimum_size_lwh_m", minimum)
+        object.__setattr__(self, "maximum_size_lwh_m", maximum)
+        if self.maximum_alternations < 1:
+            raise ValueError("maximum_alternations must be positive")
+        if self.reassignment_minimum_frame_support < 2:
+            raise ValueError("reassignment_minimum_frame_support must be at least two")
+        if self.ambiguity_envelope_allowance_m < self.target_envelope_allowance_m:
+            raise ValueError("ambiguity allowance must cover target allowance")
+        if not 0 < self.face_tail_fraction < 0.5:
+            raise ValueError("face_tail_fraction must be in (0, 0.5)")
+        if self.minimum_face_points < 3:
+            raise ValueError("minimum_face_points must be at least three")
+
+
+@dataclass(frozen=True, slots=True)
 class GeometricRefinementSettings:
     """Complete versioned configuration for the first geometric backend."""
 
@@ -176,18 +229,22 @@ class GeometricRefinementSettings:
         default_factory=EvidenceSelectionSettings
     )
     registration: RegistrationSettings = field(default_factory=RegistrationSettings)
+    envelope: EnvelopeFittingSettings = field(default_factory=EnvelopeFittingSettings)
 
     def __post_init__(self) -> None:
         if not isinstance(self.evidence, EvidenceSelectionSettings):
             raise TypeError("evidence must be EvidenceSelectionSettings")
         if not isinstance(self.registration, RegistrationSettings):
             raise TypeError("registration must be RegistrationSettings")
+        if not isinstance(self.envelope, EnvelopeFittingSettings):
+            raise TypeError("envelope must be EnvelopeFittingSettings")
 
     def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": GEOMETRIC_CONFIG_SCHEMA_VERSION,
             "evidence": asdict(self.evidence),
             "registration": asdict(self.registration),
+            "envelope": asdict(self.envelope),
         }
 
     def canonical_json(self) -> str:

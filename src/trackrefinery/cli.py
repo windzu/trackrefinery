@@ -94,6 +94,7 @@ def build_review_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--target-root")
     parser.add_argument("--thresholds")
     parser.add_argument("--trace")
+    parser.add_argument("--data-source")
     parser.add_argument("--output", required=True)
     parser.add_argument("--crop-scale", type=float, default=1.8)
     parser.add_argument("--max-points-per-frame", type=int, default=8_000)
@@ -122,6 +123,7 @@ def build_review_main(argv: Sequence[str] | None = None) -> int:
         target=target,
         evaluation=report,
         trace=read_geometric_trace(args.trace) if args.trace else None,
+        data_source=args.data_source or inference.dataset_id,
         crop_scale=args.crop_scale,
         max_points_per_frame=args.max_points_per_frame,
     )
@@ -168,6 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     build_parser.add_argument("--target-root")
     build_parser.add_argument("--thresholds")
     build_parser.add_argument("--trace")
+    build_parser.add_argument("--data-source")
     build_parser.add_argument("--output", required=True)
     build_parser.add_argument("--crop-scale", type=float, default=1.8)
     build_parser.add_argument("--max-points-per-frame", type=int, default=8_000)

@@ -1,11 +1,13 @@
 """Deterministic geometric-refinement backend and development trace API."""
 
+from trackrefinery.geometric.envelope import fit_alternating_envelope
 from trackrefinery.geometric.evidence import select_initial_evidence
 from trackrefinery.geometric.refiner import JointCuboidRefiner
 from trackrefinery.geometric.registration import register_canonical_shape
 from trackrefinery.geometric.settings import (
     GEOMETRIC_ALGORITHM_VERSION,
     GEOMETRIC_CONFIG_SCHEMA_VERSION,
+    EnvelopeFittingSettings,
     EvidenceSelectionSettings,
     GeometricRefinementSettings,
     RegistrationSettings,
@@ -13,6 +15,7 @@ from trackrefinery.geometric.settings import (
 from trackrefinery.geometric.trace import (
     EVIDENCE_TRACE_CONTRACT,
     CanonicalShapeTrace,
+    CuboidFitTrace,
     EvidenceState,
     FrameEvidenceTrace,
     FrameRegistrationTrace,
@@ -29,6 +32,8 @@ __all__ = [
     "GEOMETRIC_ALGORITHM_VERSION",
     "GEOMETRIC_CONFIG_SCHEMA_VERSION",
     "CanonicalShapeTrace",
+    "CuboidFitTrace",
+    "EnvelopeFittingSettings",
     "EvidenceSelectionSettings",
     "EvidenceState",
     "FrameEvidenceTrace",
@@ -39,6 +44,7 @@ __all__ = [
     "GroundPlaneEstimate",
     "JointCuboidRefiner",
     "RegistrationSettings",
+    "fit_alternating_envelope",
     "read_geometric_trace",
     "register_canonical_shape",
     "select_initial_evidence",

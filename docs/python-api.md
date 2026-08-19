@@ -32,9 +32,11 @@ for every input observation in the same order.
 
 The first backend currently implements initial point-evidence selection,
 ground estimation, robust per-frame upright registration, and persistent
-canonical shape aggregation. Until cuboid fitting, alternating reassignment,
-and success gates are implemented, it intentionally returns
-`algorithm_stage_incomplete` rather than publishing provisional geometry:
+canonical shape aggregation. It now also alternates cross-frame evidence
+reassignment and visible-envelope cuboid fitting. Until multi-hypothesis,
+observability, stability, and success gates are implemented, it intentionally
+returns `algorithm_stage_incomplete` rather than publishing provisional
+geometry:
 
 ```python
 from trackrefinery import JointCuboidRefiner, write_geometric_trace
@@ -44,6 +46,8 @@ assert run.outcome.status == "insufficient_evidence"
 write_geometric_trace("traces/case", run.trace)
 
 assert run.trace.canonical_shape is not None
+assert run.trace.cuboid_fit is not None
+print(run.trace.cuboid_fit.canonical_size_lwh)  # trace-only, not released
 for frame in run.trace.frames:
     # These are trace-only candidates, not released refinement results.
     print(frame.registration.status)
@@ -133,16 +137,18 @@ build_review_bundle(
     "review/run-001/case",
     target=gold,
     trace=run.trace,
+    data_source="synthetic-v1",  # or the real dataset/Clip identifier
 )
 ```
 
 The bundle contains fixed aggregate artifacts, the provisional
 `canonical_shape.npz`, orthographic thumbnails, metrics, optional evidence-mask
-sidecars, and a self-contained interactive HTML view. With a trace, initial
+sidecars, and a self-contained interactive HTML view. With a trace, current
 target, ambiguous, background, and ground points can be toggled independently;
-candidate registration poses are explicitly labeled and never presented as a
-refined result. Serve it with
-`trackrefinery-review review/run-001/case --open`.
+candidate registration poses and the visible-envelope cuboid are explicitly
+labeled and never presented as a refined result. The declared data source is
+shown on the page to distinguish generated fixtures from real Clips. Serve it
+with `trackrefinery-review review/run-001/case --open`.
 
 The CLI accepts the same sidecar through
 `trackrefinery-build-review --trace traces/case/evidence_trace.json ...`.

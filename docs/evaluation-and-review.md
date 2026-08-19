@@ -1,7 +1,8 @@
 # Evaluation and Review Design
 
-Status: framework, evidence traces, and registration previews implemented;
-correction tolerances and later optimization diagnostics remain to be calibrated
+Status: framework, alternating evidence/registration/envelope previews
+implemented; success-gate diagnostics and correction tolerances remain to be
+calibrated
 
 ## What “good” means
 
@@ -143,8 +144,10 @@ The fixed artifacts keep experiments reproducible and easy to diff. The web
 viewer supplies the interaction needed for human diagnosis. They are two views
 of one result bundle rather than competing solutions. The framework currently
 implements both views, result/metric JSON, downloadable reviewer feedback, and
-the initial target/ambiguous/background/ground evidence masks defined by the
+the current target/ambiguous/background/ground evidence masks defined by the
 [deterministic geometric refinement design](geometric-refinement-v1.md). It now
-also exports provisional registered poses and a canonical point shape colored
-by cross-frame support. Later optimization rounds will reuse the same trace
-contract for reassigned evidence and fitted envelopes.
+also exports provisional registered poses, a canonical point shape colored by
+cross-frame support, and the trace-only visible-envelope size candidate. Every
+bundle names its data source so a generated fixture cannot be mistaken for a
+real Clip. Candidate geometry is visibly marked as not released until the
+success gate exists.

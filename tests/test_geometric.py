@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from trackrefinery import (
+    EnvelopeFittingSettings,
     EvidenceSelectionSettings,
     EvidenceState,
     FrameCloud,
@@ -28,7 +29,7 @@ def _case(case_id: str = "static_complete") -> RefinementCase:
     return InferenceDataset.open(root).load_case(case_id)
 
 
-def test_joint_refiner_exposes_deterministic_registration_without_success() -> None:
+def test_joint_refiner_exposes_deterministic_envelope_without_success() -> None:
     case = _case()
     backend = JointCuboidRefiner()
 
@@ -38,7 +39,11 @@ def test_joint_refiner_exposes_deterministic_registration_without_success() -> N
     assert first.outcome.status == "insufficient_evidence"
     assert first.outcome.reasons == ("algorithm_stage_incomplete",)
     assert first.trace.config_sha256 == second.trace.config_sha256
-    assert first.trace.stage == "canonical_registration_v1"
+    assert first.trace.stage == "alternating_envelope_v1"
+    assert first.trace.cuboid_fit is not None
+    assert first.trace.cuboid_fit.status == "candidate"
+    assert first.trace.cuboid_fit.converged is True
+    assert first.trace.cuboid_fit.to_dict() == second.trace.cuboid_fit.to_dict()
     assert first.trace.canonical_shape is not None
     assert first.trace.canonical_shape.registered_frame_ids == tuple(
         frame.frame_id for frame in case.frames
@@ -216,6 +221,11 @@ def test_geometric_settings_are_validated_and_content_addressed() -> None:
             minimum_target_points=20,
             minimum_correspondences=21,
         )
+    with pytest.raises(ValueError, match="ambiguity allowance"):
+        EnvelopeFittingSettings(
+            target_envelope_allowance_m=0.3,
+            ambiguity_envelope_allowance_m=0.2,
+        )
 
 
 def test_registration_improves_clean_synthetic_pose_without_reading_targets() -> None:
@@ -273,6 +283,28 @@ def test_registration_improves_clean_synthetic_pose_without_reading_targets() ->
         )
     assert np.median(candidate_xy) < np.median(coarse_xy) * 0.7
     assert np.median(candidate_yaw) < np.median(coarse_yaw) * 0.25
+
+
+def test_visible_envelope_recovers_clean_size_without_publishing_success() -> None:
+    case = _case("moving_complete")
+    target_root = Path(__file__).parent / "fixtures" / "synthetic_v1" / "targets"
+    target = TargetDataset.open(target_root).load_target(case.case_id)
+
+    run = JointCuboidRefiner().refine_with_trace(case)
+
+    assert run.outcome.status == "insufficient_evidence"
+    assert run.outcome.reasons == ("algorithm_stage_incomplete",)
+    fit = run.trace.cuboid_fit
+    assert fit is not None
+    assert fit.status == "candidate"
+    assert fit.converged is True
+    assert fit.canonical_size_lwh is not None
+    np.testing.assert_allclose(
+        fit.canonical_size_lwh,
+        target.canonical_size_lwh,
+        atol=0.01,
+        rtol=0.0,
+    )
 
 
 def test_registration_is_invariant_to_world_coordinate_gauge() -> None:
