@@ -209,6 +209,28 @@ and all evaluated frame poses are corrected together. The reviewer also marks:
 
 Gold targets are versioned and never passed to the refiner.
 
+## Learned-backend corpus
+
+The accepted learned trajectory plan is documented in
+[`learned-refinement-plan-v1.md`](learned-refinement-plan-v1.md). Its training
+loader is separate from `InferenceDataset`: training may open explicitly paired
+examples and labels, while production inference retains no target API or
+target-path convention.
+
+Actual frozen detector/tracker trajectories are the primary training
+distribution. Annotation tracks with synthetic perturbations are useful for
+curriculum and controlled failures but cannot be the only learned input source.
+Every derivative of a physical Clip remains in the same split, including
+alternative detector profiles and augmented copies. Training, calibration, and
+selection-validation, calibration, and locked-test manifests record Clip,
+point-materialization, detector, tracker, adapter, label-revision, and content
+identities.
+
+The current four-Clip inventory supports pipeline work only. It does not meet
+the learned plan's minimum feasibility corpus or its independent calibration
+and locked-test requirements. Data audit, frozen model-track export, and
+reviewed gold preparation therefore precede neural-network implementation.
+
 ## Tier 3: reproducible public benchmarks
 
 Provide adapters and split manifests for user-downloaded nuScenes and Argoverse

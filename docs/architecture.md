@@ -65,12 +65,19 @@ with diagnostics; it must not silently return coarse boxes as refined output.
 
 ## Algorithm boundary
 
-The public framework remains backend-neutral. The accepted first production
-direction is the deterministic, non-learned
-[Component-Consensus Geometric Refinement V2](geometric-refinement-v2.md). It
-extracts one object component per usable frame, prevents weak frames from
-defining canonical geometry, performs track-anchored aggregation, estimates
-one size, and then refines every frame pose while holding that size fixed.
+The public framework remains backend-neutral. Real review showed that explicit
+point-boundary fitting remains too sensitive to incomplete faces and sparse
+clutter for the required no-correction geometry standard. The accepted next
+production research direction is therefore the size-first learned trajectory
+refiner in
+[`learned-refinement-plan-v1.md`](learned-refinement-plan-v1.md). It first has
+to prove one shared learned `length/width/height` against reviewed targets;
+only then may it add joint per-frame XYZ/yaw refinement and calibrated
+insufficient-evidence behavior.
+
+[Component-Consensus Geometric Refinement V2](geometric-refinement-v2.md) and
+its V3/V4 experiments remain frozen comparison and diagnostic backends. They
+do not silently act as a successful fallback for a learned backend.
 
 The existing `JointCuboidRefiner` implementation is the rejected V1
 experimental baseline. It performs coarse-box evidence selection, synchronous
