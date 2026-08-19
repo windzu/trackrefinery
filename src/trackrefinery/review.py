@@ -50,6 +50,20 @@ EVIDENCE_COLORS = {
     EvidenceState.GROUND: "#8d6e63",
 }
 
+LEGACY_EVIDENCE_LABELS = {
+    EvidenceState.TARGET: "target",
+    EvidenceState.AMBIGUOUS: "ambiguous",
+    EvidenceState.BACKGROUND: "background",
+    EvidenceState.GROUND: "ground",
+}
+
+COMPONENT_EVIDENCE_LABELS = {
+    EvidenceState.TARGET: "selected object component",
+    EvidenceState.AMBIGUOUS: "competing / inseparable component",
+    EvidenceState.BACKGROUND: "other ROI points",
+    EvidenceState.GROUND: "removed ground",
+}
+
 REVIEW_MODES = frozenset(
     {
         "algorithm_candidate",
@@ -62,8 +76,10 @@ REVIEW_DETAIL_LEVELS = frozenset({"catalog", "full"})
 REVIEW_MODE_PRESENTATION = {
     "algorithm_candidate": {
         "badge": "ALGORITHM CANDIDATE",
-        "label": "TrackRefinery algorithm registration",
-        "description": "Algorithm output; success is eligible for review, not release",
+        "label": "TrackRefinery algorithm result",
+        "description": (
+            "Algorithm stage output; success is eligible for review, not release"
+        ),
     },
     "model_candidate_baseline": {
         "badge": "MODEL TRACK BASELINE",
@@ -76,6 +92,26 @@ REVIEW_MODE_PRESENTATION = {
         "description": "Annotation-aligned review reference; not gold and not refined",
     },
 }
+
+
+def _evidence_presentation(
+    trace: GeometricRefinementTrace | None,
+) -> tuple[str, Mapping[EvidenceState, str]]:
+    if trace is not None and trace.stage == "component_selection_v2":
+        return "V2 component selection", COMPONENT_EVIDENCE_LABELS
+    return "Current evidence classification", LEGACY_EVIDENCE_LABELS
+
+
+def _frame_role_counts(
+    trace: GeometricRefinementTrace | None,
+) -> dict[str, int] | None:
+    if trace is None or not any(frame.component is not None for frame in trace.frames):
+        return None
+    counts = {"geometry": 0, "pose_only": 0, "trajectory_only": 0}
+    for frame in trace.frames:
+        if frame.component is not None:
+            counts[frame.component.frame_role.value] += 1
+    return counts
 
 
 def build_review_bundle(
@@ -349,6 +385,8 @@ def build_review_bundle(
         "has_gold_aligned_aggregate": gold_aggregate is not None,
         "has_metrics": evaluation is not None,
         "has_evidence_trace": trace is not None,
+        "algorithm_stage": None if trace is None else trace.stage,
+        "frame_role_counts": _frame_role_counts(trace),
         "has_registration_trace": canonical_shape is not None,
         "has_input_track_comparison": has_input_track_comparison,
         "has_cuboid_candidate": (
@@ -375,13 +413,17 @@ def build_review_bundle(
     )
 
     if detail_level == "catalog":
+        evidence_title, evidence_labels = _evidence_presentation(trace)
         _write_catalog_thumbnails(
             thumbnails,
             aggregate,
             aggregate_frame_index,
+            aggregate_evidence_state,
             preview_frames,
             outcome,
             cuboid_fit,
+            evidence_title,
+            evidence_labels,
         )
         _write_catalog_html(
             output / "preview.html",
@@ -391,6 +433,7 @@ def build_review_bundle(
             review_mode,
         )
     else:
+        evidence_title, evidence_labels = _evidence_presentation(trace)
         _write_thumbnails(
             thumbnails,
             aggregate,
@@ -405,6 +448,8 @@ def build_review_bundle(
             evaluation,
             canonical_shape,
             cuboid_fit,
+            evidence_title,
+            evidence_labels,
         )
         _write_html(
             output / "preview.html",
@@ -512,16 +557,30 @@ def _review_bundle_index_row(
         raise ValueError(f"duplicate review case_id: {case_id}")
     seen_case_ids.add(case_id)
     review_mode = manifest.get("review_mode", "algorithm_candidate")
+    algorithm_stage = manifest.get("algorithm_stage")
     canonical_top = bundle / "thumbnails" / "canonical_registration_top.png"
     comparison_top = bundle / "thumbnails" / "alignment_comparison_top.png"
     comparison_side = bundle / "thumbnails" / "alignment_comparison_side.png"
     evidence_top = bundle / "thumbnails" / "aggregate_evidence_top.png"
-    if review_mode == "algorithm_candidate":
+    evidence_side = bundle / "thumbnails" / "aggregate_evidence_side.png"
+    if algorithm_stage == "component_selection_v2":
+        alignment_label = "V2 component selection · input-track alignment"
+    elif review_mode == "algorithm_candidate":
         alignment_label = "Algorithm registration"
     elif review_mode == "source_annotation_reference":
         alignment_label = "Annotation alignment"
     else:
         alignment_label = "Inference-track alignment"
+    display_top = (
+        evidence_top
+        if algorithm_stage == "component_selection_v2" and evidence_top.is_file()
+        else top
+    )
+    display_side = (
+        evidence_side
+        if algorithm_stage == "component_selection_v2" and evidence_side.is_file()
+        else side
+    )
     return {
         "case_id": case_id,
         "track_id": manifest.get("track_id"),
@@ -531,14 +590,14 @@ def _review_bundle_index_row(
         "outcome_status": manifest.get("outcome_status"),
         "review_mode": review_mode,
         "detail_level": manifest.get("detail_level", "full"),
+        "algorithm_stage": algorithm_stage,
+        "frame_role_counts": manifest.get("frame_role_counts"),
         "has_gold_aligned_aggregate": manifest.get("has_gold_aligned_aggregate", False),
         "cuboid_candidate_size_lwh": manifest.get("cuboid_candidate_size_lwh"),
         "preview_path": (relative / "preview.html").as_posix(),
-        "aggregate_top_path": top.relative_to(output).as_posix(),
+        "aggregate_top_path": display_top.relative_to(output).as_posix(),
         "aggregate_top_label": f"{alignment_label} · TOP aggregate",
-        "aggregate_side_path": (
-            relative / "thumbnails" / "aggregate_side.png"
-        ).as_posix(),
+        "aggregate_side_path": display_side.relative_to(output).as_posix(),
         "aggregate_side_label": f"{alignment_label} · SIDE aggregate",
         "canonical_top_path": (
             canonical_top.relative_to(output).as_posix()
@@ -707,9 +766,9 @@ def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
   <header><h1>{title_display}</h1>
     <p class="catalog-explainer"><strong>Every image below is a multi-frame
     point-cloud aggregate.</strong>
-    The badge and caption state whether points are aligned by model tracking,
-    TrackRefinery registration, or source annotation. An algorithm success is
-    eligible for caller review; it is never an automatic release.</p>
+    The badge, stage summary, and caption state what was run and which poses
+    align the points. An algorithm success is eligible for caller review; it is
+    never an automatic release.</p>
     <div class="filters">{"".join(filter_buttons)}</div>
     <nav>{"".join(buttons)}</nav></header>
   <main>{"".join(panels)}</main>
@@ -764,6 +823,14 @@ def _clip_instance_card(instance: object) -> str:
     point_count = html_module.escape(str(instance.get("aggregate_point_count") or "?"))
     status = str(instance.get("outcome_status") or "unknown")
     mode = str(instance.get("review_mode") or "algorithm_candidate")
+    algorithm_stage = str(instance.get("algorithm_stage") or "not run")
+    frame_roles = instance.get("frame_role_counts")
+    role_label = ""
+    if isinstance(frame_roles, dict):
+        role_label = " · ".join(
+            f"{name} {int(frame_roles.get(name, 0))}"
+            for name in ("geometry", "pose_only", "trajectory_only")
+        )
     presentation = REVIEW_MODE_PRESENTATION[mode]
     if mode == "algorithm_candidate":
         release_label = (
@@ -859,6 +926,8 @@ def _clip_instance_card(instance: object) -> str:
         f'<div class="{views_class}">{"".join(figures)}</div>'
         f'<p class="mode">{html_module.escape(mode_label)}</p>'
         f"{release_warning}"
+        f"<p>{html_module.escape(algorithm_stage)}"
+        f"{(' · ' + html_module.escape(role_label)) if role_label else ''}</p>"
         f"<p>{frame_count} frames · {point_count} displayed points</p>"
         f"<p>{html_module.escape(size_label)}</p></article>"
     )
@@ -1075,9 +1144,12 @@ def _write_catalog_thumbnails(
     output: Path,
     aggregate: NDArray[np.float32],
     frame_index: NDArray[np.int16],
+    evidence_state: NDArray[np.uint8] | None,
     preview_frames: list[dict[str, object]],
     outcome: RefinementOutcome,
     cuboid_fit: CuboidFitTrace | None,
+    evidence_title: str,
+    evidence_labels: Mapping[EvidenceState, str],
 ) -> None:
     """Render only the two fixed views needed by the all-instance catalog."""
 
@@ -1098,14 +1170,24 @@ def _write_catalog_thumbnails(
         ("aggregate_side.png", 0, 2, "X (m)", "Z (m)"),
     ):
         figure, axis = plt.subplots(figsize=(5.2, 3.4), constrained_layout=True)
-        axis.scatter(
-            aggregate[:, first],
-            aggregate[:, second],
-            c=frame_index,
-            s=0.8,
-            cmap="turbo",
-            alpha=0.58,
-        )
+        if evidence_state is None:
+            axis.scatter(
+                aggregate[:, first],
+                aggregate[:, second],
+                c=frame_index,
+                s=0.8,
+                cmap="turbo",
+                alpha=0.58,
+            )
+        else:
+            _scatter_evidence_2d(
+                axis,
+                aggregate,
+                evidence_state,
+                first,
+                second,
+                evidence_labels,
+            )
         _plot_box_projection(
             axis,
             Box3D((0.0, 0.0, 0.0), size, (0.0, 0.0, 0.0, 1.0)),
@@ -1116,6 +1198,8 @@ def _write_catalog_thumbnails(
         )
         axis.set_xlabel(x_label)
         axis.set_ylabel(y_label)
+        if evidence_state is not None:
+            axis.set_title(evidence_title, fontsize=9)
         axis.set_aspect("equal", adjustable="box")
         axis.legend(loc="best", fontsize=7)
         figure.savefig(output / name, dpi=110)
@@ -1307,6 +1391,8 @@ def _write_thumbnails(
     evaluation: EvaluationReport | None,
     canonical_shape: CanonicalShapeTrace | None,
     cuboid_fit: CuboidFitTrace | None,
+    evidence_title: str,
+    evidence_labels: Mapping[EvidenceState, str],
 ) -> None:
     try:
         import matplotlib
@@ -1482,23 +1568,34 @@ def _write_thumbnails(
         plt.close(figure)
 
     if evidence_state is not None:
-        figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
-        _scatter_evidence_2d(axis, aggregate, evidence_state, 0, 1)
-        _plot_box_projection(
-            axis,
-            Box3D((0.0, 0.0, 0.0), size, (0.0, 0.0, 0.0, 1.0)),
-            0,
-            1,
-            result_color,
-            result_label,
-        )
-        axis.set_title("Current evidence classification")
-        axis.set_xlabel("X (m)")
-        axis.set_ylabel("Y (m)")
-        axis.set_aspect("equal", adjustable="box")
-        axis.legend(loc="best")
-        figure.savefig(output / "aggregate_evidence_top.png", dpi=140)
-        plt.close(figure)
+        for name, first, second, x_label, y_label in (
+            ("aggregate_evidence_top.png", 0, 1, "X (m)", "Y (m)"),
+            ("aggregate_evidence_side.png", 0, 2, "X (m)", "Z (m)"),
+        ):
+            figure, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
+            _scatter_evidence_2d(
+                axis,
+                aggregate,
+                evidence_state,
+                first,
+                second,
+                evidence_labels,
+            )
+            _plot_box_projection(
+                axis,
+                Box3D((0.0, 0.0, 0.0), size, (0.0, 0.0, 0.0, 1.0)),
+                first,
+                second,
+                result_color,
+                result_label,
+            )
+            axis.set_title(evidence_title)
+            axis.set_xlabel(x_label)
+            axis.set_ylabel(y_label)
+            axis.set_aspect("equal", adjustable="box")
+            axis.legend(loc="best")
+            figure.savefig(output / name, dpi=140)
+            plt.close(figure)
 
     worst_frame_id = _worst_frame_id(evaluation, preview_frames)
     frame = next(item for item in preview_frames if item["frame_id"] == worst_frame_id)
@@ -1506,7 +1603,7 @@ def _write_thumbnails(
     points = frame["points_xyz"]
     point_states = frame["point_states"]
     if isinstance(point_states, np.ndarray):
-        _scatter_evidence_2d(axis, points, point_states, 0, 1)
+        _scatter_evidence_2d(axis, points, point_states, 0, 1, evidence_labels)
     else:
         axis.scatter(points[:, 0], points[:, 1], s=1, c="#9e9e9e", alpha=0.65)
     for key, color, label in (
@@ -1534,16 +1631,31 @@ def _scatter_evidence_2d(
     states: NDArray[np.uint8],
     first: int,
     second: int,
+    labels: Mapping[EvidenceState, str],
 ) -> None:
-    for state in EvidenceState:
+    component_stage = labels is COMPONENT_EVIDENCE_LABELS
+    order = (
+        EvidenceState.BACKGROUND,
+        EvidenceState.GROUND,
+        EvidenceState.AMBIGUOUS,
+        EvidenceState.TARGET,
+    )
+    styles = {
+        EvidenceState.TARGET: (2.2, 0.88),
+        EvidenceState.AMBIGUOUS: (1.4, 0.55),
+        EvidenceState.BACKGROUND: (0.55, 0.1 if component_stage else 0.35),
+        EvidenceState.GROUND: (0.5, 0.08 if component_stage else 0.35),
+    }
+    for state in order:
         selected = points[states == state.value]
+        size, alpha = styles[state]
         axis.scatter(
             selected[:, first],
             selected[:, second],
-            s=2,
+            s=size,
             c=EVIDENCE_COLORS[state],
-            alpha=0.7,
-            label=state.name.lower(),
+            alpha=alpha,
+            label=labels[state],
         )
 
 
@@ -1607,6 +1719,8 @@ def _write_html(
             "review bundle rendering requires 'pip install trackrefinery[review]'"
         ) from error
 
+    evidence_title, evidence_labels = _evidence_presentation(trace)
+    is_component_stage = trace is not None and trace.stage == "component_selection_v2"
     input_track_figure = None
     if input_track_aggregate is not None:
         input_track_figure = go.Figure()
@@ -1697,9 +1811,13 @@ def _write_html(
             "#00b8d4",
         )
     aggregate_title = (
-        "Source-annotation-aligned aggregate (reference only; not gold)"
-        if review_mode == "source_annotation_reference"
-        else "Algorithm-candidate-aligned aggregate (points colored by frame)"
+        "Input-track-aligned V2 component preview (no registration performed)"
+        if is_component_stage
+        else (
+            "Source-annotation-aligned aggregate (reference only; not gold)"
+            if review_mode == "source_annotation_reference"
+            else "Algorithm-candidate-aligned aggregate (points colored by frame)"
+        )
     )
     aggregate_figure.update_layout(
         title=aggregate_title,
@@ -1803,7 +1921,9 @@ def _write_html(
     evidence_figure = None
     if aggregate_evidence_state is not None:
         evidence_figure = go.Figure()
-        for state_trace in _plotly_evidence_traces(aggregate, aggregate_evidence_state):
+        for state_trace in _plotly_evidence_traces(
+            aggregate, aggregate_evidence_state, evidence_labels
+        ):
             evidence_figure.add_trace(state_trace)
         _add_plotly_box(
             evidence_figure,
@@ -1812,7 +1932,7 @@ def _write_html(
             result_color,
         )
         evidence_figure.update_layout(
-            title="Current evidence classification",
+            title=evidence_title,
             scene={"aspectmode": "data"},
             margin={"l": 0, "r": 0, "t": 45, "b": 0},
         )
@@ -1823,7 +1943,7 @@ def _write_html(
         point_states = item["point_states"]
         traces: list[object]
         if isinstance(point_states, np.ndarray):
-            traces = _plotly_evidence_traces(points, point_states)
+            traces = _plotly_evidence_traces(points, point_states, evidence_labels)
         else:
             traces = [
                 go.Scatter3d(
@@ -1931,6 +2051,12 @@ def _write_html(
     track_display = html_module.escape(case.track.track_id)
     source_display = html_module.escape(data_source)
     review_mode_display = html_module.escape(review_mode)
+    algorithm_stage_display = html_module.escape(
+        "none" if trace is None else trace.stage
+    )
+    role_counts_display = html_module.escape(
+        json.dumps(_frame_role_counts(trace), sort_keys=True)
+    )
     candidate_display = (
         "none"
         if trace is None
@@ -1944,14 +2070,28 @@ def _write_html(
     view_tabs = (
         [("comparison", "Alignment A/B", alignment_comparison_html)]
         if alignment_comparison_html
-        else [("algorithm", "Algorithm aggregate", aggregate_html)]
+        else [
+            (
+                "algorithm",
+                "Input-track aggregate"
+                if is_component_stage
+                else "Algorithm aggregate",
+                aggregate_html,
+            )
+        ]
     )
     if gold_aggregate_html:
         view_tabs.append(("annotation", "Annotation aggregate", gold_aggregate_html))
     if canonical_html:
         view_tabs.append(("canonical", "Canonical shape", canonical_html))
     if evidence_html:
-        view_tabs.append(("evidence", "Current evidence", evidence_html))
+        view_tabs.append(
+            (
+                "evidence",
+                "V2 component selection" if is_component_stage else "Current evidence",
+                evidence_html,
+            )
+        )
     view_tabs.extend(
         (
             ("frames", "Per-frame result", frame_html),
@@ -2016,6 +2156,8 @@ def _write_html(
   <p>Track {track_display} · {outcome.status}</p>
   <p><strong>Data source:</strong> {source_display}</p>
   <p><strong>Review mode:</strong> {review_mode_display}</p>
+  <p><strong>Algorithm stage:</strong> {algorithm_stage_display}</p>
+  <p><strong>Frame roles:</strong> {role_counts_display}</p>
   <p><strong>Trace-only cuboid candidate:</strong> {candidate_display}</p>
   <nav class="view-tabs">{view_buttons}</nav>
   {view_panels}
@@ -2076,13 +2218,29 @@ def _add_plotly_box(figure: object, box: Box3D, name: str, color: str) -> None:
 
 
 def _plotly_evidence_traces(
-    points: NDArray[np.floating], states: NDArray[np.uint8]
+    points: NDArray[np.floating],
+    states: NDArray[np.uint8],
+    labels: Mapping[EvidenceState, str],
 ) -> list[object]:
     import plotly.graph_objects as go
 
     traces = []
-    for state in EvidenceState:
+    component_stage = labels is COMPONENT_EVIDENCE_LABELS
+    order = (
+        EvidenceState.BACKGROUND,
+        EvidenceState.GROUND,
+        EvidenceState.AMBIGUOUS,
+        EvidenceState.TARGET,
+    )
+    styles = {
+        EvidenceState.TARGET: (2.2, 0.88),
+        EvidenceState.AMBIGUOUS: (1.8, 0.55),
+        EvidenceState.BACKGROUND: (1.0, 0.1 if component_stage else 0.4),
+        EvidenceState.GROUND: (1.0, 0.08 if component_stage else 0.4),
+    }
+    for state in order:
         selected = points[states == state.value]
+        size, opacity = styles[state]
         traces.append(
             go.Scatter3d(
                 x=selected[:, 0],
@@ -2090,11 +2248,11 @@ def _plotly_evidence_traces(
                 z=selected[:, 2],
                 mode="markers",
                 marker={
-                    "size": 1.8,
+                    "size": size,
                     "color": EVIDENCE_COLORS[state],
-                    "opacity": 0.7,
+                    "opacity": opacity,
                 },
-                name=state.name.lower(),
+                name=labels[state],
             )
         )
     return traces

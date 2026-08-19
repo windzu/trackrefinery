@@ -1,7 +1,8 @@
 # Evaluation and Review Design
 
-Status: framework and legacy V1 previews implemented; V2 component, frame-role,
-and fixed-size comparison diagnostics remain to be implemented
+Status: framework, legacy V1 previews, and V2 component/frame-role previews
+implemented; V2 alignment, canonical-size, and fixed-size pose diagnostics
+remain to be implemented
 
 ## What “good” means
 

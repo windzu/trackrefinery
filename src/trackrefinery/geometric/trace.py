@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from enum import IntEnum
+from enum import Enum, IntEnum
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +23,196 @@ class EvidenceState(IntEnum):
     AMBIGUOUS = 2
     BACKGROUND = 3
     GROUND = 4
+
+
+class FrameRole(str, Enum):
+    """Authority granted to one frame by the V2 component stage."""
+
+    GEOMETRY = "geometry"
+    POSE_ONLY = "pose_only"
+    TRAJECTORY_ONLY = "trajectory_only"
+
+
+@dataclass(frozen=True, slots=True)
+class FrameComponentTrace:
+    """V2 component-selection decision and measurable frame role evidence."""
+
+    status: str
+    frame_role: FrameRole
+    reason_codes: tuple[str, ...]
+    component_count: int
+    candidate_component_count: int
+    selected_component_id: int | None
+    selected_point_count: int
+    selected_voxel_count: int
+    seed_point_count: int
+    component_dominance: float | None
+    nearest_competing_distance_m: float | None
+    robust_spread_xyz_m: tuple[float, float, float] | None
+    resolution_stability_iou: float | None
+
+    def __post_init__(self) -> None:
+        if self.status not in {"selected", "ambiguous", "insufficient_evidence"}:
+            raise ValueError("component status is unsupported")
+        object.__setattr__(self, "frame_role", FrameRole(self.frame_role))
+        reasons = tuple(self.reason_codes)
+        if any(not isinstance(value, str) or not value for value in reasons):
+            raise ValueError("component reason_codes must be non-empty strings")
+        counts = (
+            self.component_count,
+            self.candidate_component_count,
+            self.selected_point_count,
+            self.selected_voxel_count,
+            self.seed_point_count,
+        )
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+            for value in counts
+        ):
+            raise ValueError("component counts must be non-negative integers")
+        if self.candidate_component_count > self.component_count:
+            raise ValueError("candidate component count exceeds total components")
+        if self.status in {"selected", "ambiguous"}:
+            if (
+                self.selected_component_id is None
+                or self.selected_component_id < 0
+                or self.selected_component_id >= self.component_count
+                or self.selected_point_count < 1
+                or self.selected_voxel_count < 1
+                or self.seed_point_count < 1
+                or self.component_dominance is None
+                or self.robust_spread_xyz_m is None
+                or self.resolution_stability_iou is None
+            ):
+                raise ValueError("selected or ambiguous component requires metrics")
+            if self.status == "ambiguous" and (
+                self.frame_role is not FrameRole.TRAJECTORY_ONLY or not reasons
+            ):
+                raise ValueError(
+                    "ambiguous component requires trajectory-only role and reasons"
+                )
+        else:
+            if self.frame_role is not FrameRole.TRAJECTORY_ONLY or not reasons:
+                raise ValueError(
+                    "insufficient component requires trajectory-only role and reasons"
+                )
+            if any(
+                value is not None
+                for value in (
+                    self.selected_component_id,
+                    self.component_dominance,
+                    self.robust_spread_xyz_m,
+                    self.resolution_stability_iou,
+                )
+            ):
+                raise ValueError("insufficient component cannot carry selected metrics")
+            if any(
+                value != 0
+                for value in (
+                    self.selected_point_count,
+                    self.selected_voxel_count,
+                    self.seed_point_count,
+                )
+            ):
+                raise ValueError("insufficient component cannot carry selected counts")
+        for name, value in (
+            ("component_dominance", self.component_dominance),
+            ("resolution_stability_iou", self.resolution_stability_iou),
+        ):
+            if value is not None and (
+                not np.isfinite(value) or not 0.0 <= value <= 1.0
+            ):
+                raise ValueError(f"{name} must be finite and in [0, 1]")
+        if self.nearest_competing_distance_m is not None and (
+            not np.isfinite(self.nearest_competing_distance_m)
+            or self.nearest_competing_distance_m < 0
+        ):
+            raise ValueError(
+                "nearest_competing_distance_m must be finite and non-negative"
+            )
+        if self.robust_spread_xyz_m is not None:
+            spread = tuple(float(value) for value in self.robust_spread_xyz_m)
+            if (
+                len(spread) != 3
+                or not np.isfinite(spread).all()
+                or any(value < 0 for value in spread)
+            ):
+                raise ValueError("robust_spread_xyz_m must be a non-negative triplet")
+            object.__setattr__(self, "robust_spread_xyz_m", spread)
+        object.__setattr__(self, "reason_codes", reasons)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "frame_role": self.frame_role.value,
+            "reason_codes": list(self.reason_codes),
+            "component_count": self.component_count,
+            "candidate_component_count": self.candidate_component_count,
+            "selected_component_id": self.selected_component_id,
+            "selected_point_count": self.selected_point_count,
+            "selected_voxel_count": self.selected_voxel_count,
+            "seed_point_count": self.seed_point_count,
+            "component_dominance": self.component_dominance,
+            "nearest_competing_distance_m": self.nearest_competing_distance_m,
+            "robust_spread_xyz_m": (
+                None
+                if self.robust_spread_xyz_m is None
+                else list(self.robust_spread_xyz_m)
+            ),
+            "resolution_stability_iou": self.resolution_stability_iou,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> FrameComponentTrace:
+        if not isinstance(value, dict):
+            raise ValueError("component must be an object")
+        reasons = value.get("reason_codes")
+        if not isinstance(reasons, list) or any(
+            not isinstance(reason, str) for reason in reasons
+        ):
+            raise ValueError("component reason_codes must be a string list")
+        selected_id = value.get("selected_component_id")
+        if selected_id is not None:
+            selected_id = _integer(selected_id, "selected_component_id")
+        spread = value.get("robust_spread_xyz_m")
+        return cls(
+            status=_string(value.get("status"), "component.status"),
+            frame_role=FrameRole(
+                _string(value.get("frame_role"), "component.frame_role")
+            ),
+            reason_codes=tuple(reasons),
+            component_count=_integer(value.get("component_count"), "component_count"),
+            candidate_component_count=_integer(
+                value.get("candidate_component_count"),
+                "candidate_component_count",
+            ),
+            selected_component_id=selected_id,
+            selected_point_count=_integer(
+                value.get("selected_point_count"), "selected_point_count"
+            ),
+            selected_voxel_count=_integer(
+                value.get("selected_voxel_count"), "selected_voxel_count"
+            ),
+            seed_point_count=_integer(
+                value.get("seed_point_count"), "seed_point_count"
+            ),
+            component_dominance=_optional_number(
+                value.get("component_dominance"), "component_dominance"
+            ),
+            nearest_competing_distance_m=_optional_number(
+                value.get("nearest_competing_distance_m"),
+                "nearest_competing_distance_m",
+            ),
+            robust_spread_xyz_m=(
+                None
+                if spread is None
+                else _float_triplet(spread, "robust_spread_xyz_m")
+            ),
+            resolution_stability_iou=_optional_number(
+                value.get("resolution_stability_iou"),
+                "resolution_stability_iou",
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +395,7 @@ class FrameEvidenceTrace:
     point_states: NDArray[np.uint8]
     ground_plane: GroundPlaneEstimate | None = None
     represented_sensor_ids: tuple[str, ...] = ()
+    component: FrameComponentTrace | None = None
     registration: FrameRegistrationTrace | None = None
 
     def __post_init__(self) -> None:
@@ -250,6 +441,7 @@ class FrameEvidenceTrace:
             "ground_plane": (
                 None if self.ground_plane is None else self.ground_plane.to_dict()
             ),
+            "component": None if self.component is None else self.component.to_dict(),
             "registration": (
                 None if self.registration is None else self.registration.to_dict()
             ),
@@ -657,6 +849,7 @@ def read_geometric_trace(path: str | Path) -> GeometricRefinementTrace:
             if not isinstance(index_key, str) or not isinstance(state_key, str):
                 raise ValueError("trace frame array keys must be strings")
             ground = row.get("ground_plane")
+            component = row.get("component")
             registration = row.get("registration")
             sensors = row.get("represented_sensor_ids")
             if not isinstance(sensors, list) or any(
@@ -674,6 +867,11 @@ def read_geometric_trace(path: str | Path) -> GeometricRefinementTrace:
                         else GroundPlaneEstimate.from_dict(ground)
                     ),
                     represented_sensor_ids=tuple(sensors),
+                    component=(
+                        None
+                        if component is None
+                        else FrameComponentTrace.from_dict(component)
+                    ),
                     registration=(
                         None
                         if registration is None
