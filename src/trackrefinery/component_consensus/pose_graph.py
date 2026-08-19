@@ -247,9 +247,8 @@ def aggregate_geometry_components_pose_graph(
     )
     accepted = tuple(item for item in measurements if item.transform is not None)
     connected = _connected_indices(anchor.index, accepted)
-    if (
-        len(connected) < resolved.track_minimum_geometry_frames
-        or len(connected) != len(states)
+    if len(connected) < resolved.track_minimum_geometry_frames or len(connected) != len(
+        states
     ):
         return _insufficient_pose_graph_run(
             case,
