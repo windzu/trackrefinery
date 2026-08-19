@@ -211,32 +211,40 @@ Gold targets are versioned and never passed to the refiner.
 
 ## Learned-backend corpus
 
-The accepted learned trajectory plan is documented in
-[`learned-refinement-plan-v1.md`](learned-refinement-plan-v1.md). Its training
-loader is separate from `InferenceDataset`: training may open explicitly paired
-examples and labels, while production inference retains no target API or
-target-path convention.
+The current learned research direction is documented in the
+[object-centric foundation plan](object-centric-foundation-exploration-v1.md).
+Its training loader is separate from `InferenceDataset`: training may open
+explicitly paired examples and labels, while production inference retains no
+target API or target-path convention.
 
-Actual frozen detector/tracker trajectories are the primary training
-distribution. Annotation tracks with synthetic perturbations are useful for
-curriculum and controlled failures but cannot be the only learned input source.
-Every derivative of a physical Clip remains in the same split, including
-alternative detector profiles and augmented copies. Training, calibration, and
-selection-validation, calibration, and locked-test manifests record Clip,
+The generic representation is trained from broad normalized 3D geometry,
+multi-domain public metric trajectories, and recorded observation
+randomization. No production detector, LiDAR, vehicle, or Clip family is the
+primary distribution. Every derivative of one asset or physical instance
+remains in the same split, including alternative detector profiles and
+augmented copies. Training, selection-validation, public calibration,
+leave-one-domain-out, and locked-test manifests record asset/Clip,
 point-materialization, detector, tracker, adapter, label-revision, and content
-identities.
+identities as applicable.
 
-The current four-Clip inventory supports pipeline work only. It does not meet
-the learned plan's minimum feasibility corpus or its independent calibration
-and locked-test requirements. Data audit, frozen model-track export, and
-reviewed gold preparation therefore precede neural-network implementation.
+The current four-Clip inventory supports adapter work, qualitative review, and
+operational-domain smoke only. It has already informed development and cannot
+become a locked qualification set. It must not be used to choose the generic
+architecture, tune losses, train the checkpoint, or calibrate its release rule.
+Stage 0 therefore begins with public/asset research manifests and factorization
+tests, not production-data extraction. Independently selected, previously
+unseen production Clips are sealed only after the generic checkpoint and
+release policy are frozen.
 
 ## Tier 3: reproducible public benchmarks
 
-Provide adapters and split manifests for user-downloaded nuScenes and Argoverse
-2 Sensor data. Do not redistribute third-party sensor assets. Public labels
-still require filtering for tracks whose geometry is consistent enough to act
-as a refinement target.
+Provide adapters and split manifests for several user-downloaded public sensor
+datasets, with nuScenes and Argoverse 2 Sensor as initial candidates rather than
+the complete domain set. Do not redistribute third-party sensor assets. Public
+labels still require filtering for tracks whose geometry is consistent enough
+to act as a refinement target. Reports include leave-one-dataset,
+leave-one-observation, and leave-one-detector holdouts instead of only random
+within-dataset splits.
 
 ## Split discipline
 

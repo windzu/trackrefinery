@@ -67,13 +67,14 @@ with diagnostics; it must not silently return coarse boxes as refined output.
 
 The public framework remains backend-neutral. Real review showed that explicit
 point-boundary fitting remains too sensitive to incomplete faces and sparse
-clutter for the required no-correction geometry standard. The accepted next
-production research direction is therefore the size-first learned trajectory
-refiner in
-[`learned-refinement-plan-v1.md`](learned-refinement-plan-v1.md). It first has
-to prove one shared learned `length/width/height` against reviewed targets;
-only then may it add joint per-frame XYZ/yaw refinement and calibrated
-insufficient-evidence behavior.
+clutter for the required no-correction geometry standard. The current next
+research direction is therefore the representation-first
+[object-centric foundation exploration](object-centric-foundation-exploration-v1.md).
+It tests whether a model can separate complete canonical shape, metric scale,
+per-frame pose, and nuisance observation sampling before it is allowed to act
+as a refinement backend. Direct trajectory `delta_log_lwh` regression from the
+superseded [learned V1 plan](learned-refinement-plan-v1.md) remains only a
+negative-control baseline.
 
 [Component-Consensus Geometric Refinement V2](geometric-refinement-v2.md) and
 its V3/V4 experiments remain frozen comparison and diagnostic backends. They
