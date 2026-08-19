@@ -1,8 +1,9 @@
 # Evaluation and Review Design
 
 Status: framework, legacy V1 previews, V2 component/frame-role plus anchored
-alignment previews, and controlled Stage 3 recovery diagnostics implemented;
-canonical-size and fixed-size pose diagnostics remain to be implemented
+alignment previews, controlled Stage 3 recovery, and experimental Stage 4
+canonical-size diagnostics implemented; reviewed-target calibration and
+fixed-size per-frame pose diagnostics remain
 
 ## What “good” means
 
@@ -256,6 +257,13 @@ the canonical shape. An unsuccessful algorithm outcome must be marked not
 released and must not visually resemble an accepted annotation result. A
 successful outcome remains a candidate for caller review; the catalog never
 claims that it has been released.
+
+For the Stage 4 experiment, each card separately reports the sizing decision
+even though the end-to-end outcome remains `insufficient_evidence`. It shows
+input-to-fit dimensions, common center/yaw correction, per-face supporting
+frame counts, leave-one-out and resolution stability, and stable rejection
+reasons. A rejected provisional fit remains diagnostic text only and is never
+drawn as a candidate cuboid.
 
 During the dense-first MVP, algorithm cards also state whether the instance
 passes the current dense-track gate. Dense-supported cards sort before

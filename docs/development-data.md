@@ -173,6 +173,29 @@ refuse to infer a cluster yaw through a weak bridge, while the sequential
 baseline still emits a low-recovery candidate. This is the confidence behavior
 required for automatic-label release.
 
+### Stage 4 observable canonical cuboid result
+
+Stage 4 runs only on the V3 normal-aware trace and uses no model dimensions,
+category priors, sensor rays, or reviewed annotations. It requires repeated
+surface-normal support for both length faces, both width faces, the top, and a
+consistent transformed ground boundary. All thresholds are recorded in the
+experiment sidecar.
+
+On the same five-track slice, `83bdbc95` is the only sizing candidate. Its
+model median size is `6.338 x 2.704 x 3.183 m`; the observable fit is
+`6.135 x 2.489 x 3.055 m`. All six boundaries are supported by at least 11 of
+17 geometry frames, leave-one-frame-out dimension change is at most 1.6 cm,
+and neighboring-resolution change is at most 1.8 cm. The fixed side/top views
+show a coherent truck silhouette and a tighter box, but there is no reviewed
+target, so this is qualitative evidence rather than an accuracy claim.
+
+`8a60c8b6`, `fe8dfe0c`, and `2a9844b6` retain provisional numbers only in the
+diagnostic sidecar and are not drawn as sizing candidates. They lack repeated
+normal-aligned support for one or more opposing length/width faces.
+`33acbf1b` never enters sizing because Stage 3 rejects its weak partial-overlap
+bridge. The five-case page is generated under
+`.data/real-clip-review/site/size-v4/`; private assets are not committed.
+
 ## Gold-target preparation
 
 Existing annotation is a candidate target, not automatically gold. Selected

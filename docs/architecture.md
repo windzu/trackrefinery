@@ -108,6 +108,16 @@ pairwise local measurements from one robust global pose-graph solve, uses exact
 timestamps and frame poses for trajectory consistency, and keeps graph
 diagnostics in an experimental sidecar until the promotion gate passes.
 
+The experimental Stage 4 sizing implementation is documented in
+[`stage4-observable-canonical-cuboid-v1.md`](stage4-observable-canonical-cuboid-v1.md).
+It consumes only an accepted Stage 3 trace, estimates common upright axes and
+cross-frame-supported physical boundaries, and rejects missing opposing faces
+instead of substituting model/category dimensions. It applies one common
+center/yaw gauge transform to all participating poses. The API and review
+sidecar are implemented, but it still cannot publish `RefinementSuccess`;
+reviewed-target calibration and fixed-shape per-frame pose refinement remain
+gated work.
+
 Future experimental backends may use a different implementation without
 changing the public full-frame input or validated success/insufficient outcome.
 They must be named explicitly and must not weaken the public success semantics.

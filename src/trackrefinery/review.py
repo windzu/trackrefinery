@@ -65,6 +65,22 @@ COMPONENT_EVIDENCE_LABELS = {
     EvidenceState.GROUND: "removed ground",
 }
 
+COMPONENT_TRACE_STAGES = frozenset(
+    {
+        "component_selection_v2",
+        "anchored_component_aggregation_v2",
+        "pose_graph_aggregation_v3_experiment",
+        "observable_canonical_cuboid_v4_experiment",
+    }
+)
+ALIGNED_COMPONENT_STAGES = frozenset(
+    {
+        "anchored_component_aggregation_v2",
+        "pose_graph_aggregation_v3_experiment",
+        "observable_canonical_cuboid_v4_experiment",
+    }
+)
+
 REVIEW_MODES = frozenset(
     {
         "algorithm_candidate",
@@ -98,12 +114,27 @@ REVIEW_MODE_PRESENTATION = {
 def _evidence_presentation(
     trace: GeometricRefinementTrace | None,
 ) -> tuple[str, Mapping[EvidenceState, str]]:
-    if trace is not None and trace.stage in {
-        "component_selection_v2",
-        "anchored_component_aggregation_v2",
-    }:
-        return "V2 component selection", COMPONENT_EVIDENCE_LABELS
+    if trace is not None and trace.stage in COMPONENT_TRACE_STAGES:
+        title = {
+            "component_selection_v2": "V2 component selection",
+            "anchored_component_aggregation_v2": "V2 component selection",
+            "pose_graph_aggregation_v3_experiment": "V3 pose-graph evidence",
+            "observable_canonical_cuboid_v4_experiment": (
+                "V4 observable canonical cuboid evidence"
+            ),
+        }[trace.stage]
+        return title, COMPONENT_EVIDENCE_LABELS
     return "Current evidence classification", LEGACY_EVIDENCE_LABELS
+
+
+def _canonical_cuboid_diagnostics(
+    outcome_payload: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    diagnostics = outcome_payload.get("diagnostics")
+    if not isinstance(diagnostics, Mapping):
+        return None
+    canonical_cuboid = diagnostics.get("canonical_cuboid")
+    return canonical_cuboid if isinstance(canonical_cuboid, Mapping) else None
 
 
 def _frame_role_counts(
@@ -122,10 +153,7 @@ def _dense_scope_summary(
     outcome: RefinementOutcome,
     trace: GeometricRefinementTrace | None,
 ) -> tuple[bool | None, int | None]:
-    if trace is None or trace.stage not in {
-        "component_selection_v2",
-        "anchored_component_aggregation_v2",
-    }:
+    if trace is None or trace.stage not in COMPONENT_TRACE_STAGES:
         return None, None
     diagnostics = getattr(outcome, "diagnostics", None)
     supported = (
@@ -389,9 +417,9 @@ def build_review_bundle(
             points_xyz=canonical_shape.points_xyz,
             frame_support_count=canonical_shape.frame_support_count,
         )
+    outcome_payload = outcome_to_dict(case.case_id, outcome)
     (output / "result.json").write_text(
-        json.dumps(outcome_to_dict(case.case_id, outcome), indent=2, sort_keys=True)
-        + "\n",
+        json.dumps(outcome_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     if evaluation is not None:
@@ -434,9 +462,17 @@ def build_review_bundle(
         "has_cuboid_candidate": (
             cuboid_fit is not None and cuboid_fit.status == "candidate"
         ),
+        "input_median_size_lwh": tuple(
+            float(value)
+            for value in np.median(
+                [item.coarse_box.size_lwh for item in case.track.observations],
+                axis=0,
+            )
+        ),
         "cuboid_candidate_size_lwh": (
             None if cuboid_fit is None else cuboid_fit.canonical_size_lwh
         ),
+        "canonical_cuboid_experiment": _canonical_cuboid_diagnostics(outcome_payload),
         "evidence_trace_path": "evidence_trace.json" if trace is not None else None,
         "evidence_masks_path": "evidence_masks.npz" if trace is not None else None,
         "canonical_shape_path": (
@@ -617,6 +653,10 @@ def _review_bundle_index_row(
         alignment_label = "V2 component selection · input-track alignment"
     elif algorithm_stage == "anchored_component_aggregation_v2":
         alignment_label = "V2 anchored component aggregation"
+    elif algorithm_stage == "pose_graph_aggregation_v3_experiment":
+        alignment_label = "V3 observable pose-graph aggregate"
+    elif algorithm_stage == "observable_canonical_cuboid_v4_experiment":
+        alignment_label = "V4 observable canonical cuboid"
     elif review_mode == "algorithm_candidate":
         alignment_label = "Algorithm registration"
     elif review_mode == "source_annotation_reference":
@@ -649,7 +689,9 @@ def _review_bundle_index_row(
             "selected_component_point_count"
         ),
         "has_gold_aligned_aggregate": manifest.get("has_gold_aligned_aggregate", False),
+        "input_median_size_lwh": manifest.get("input_median_size_lwh"),
         "cuboid_candidate_size_lwh": manifest.get("cuboid_candidate_size_lwh"),
+        "canonical_cuboid_experiment": manifest.get("canonical_cuboid_experiment"),
         "preview_path": (relative / "preview.html").as_posix(),
         "aggregate_top_path": display_top.relative_to(output).as_posix(),
         "aggregate_top_label": f"{alignment_label} · TOP aggregate",
@@ -904,7 +946,24 @@ def _clip_instance_card(instance: object) -> str:
     else:
         scope_badge = ""
     presentation = REVIEW_MODE_PRESENTATION[mode]
-    if mode == "algorithm_candidate":
+    canonical_cuboid = instance.get("canonical_cuboid_experiment")
+    is_canonical_cuboid = isinstance(canonical_cuboid, Mapping)
+    canonical_status = (
+        str(canonical_cuboid.get("status") or "unknown")
+        if is_canonical_cuboid
+        else None
+    )
+    if mode == "algorithm_candidate" and is_canonical_cuboid:
+        release_label = (
+            "SIZE CANDIDATE · NOT RELEASED"
+            if canonical_status == "candidate"
+            else "SIZE REJECTED · INSUFFICIENT EVIDENCE"
+        )
+        mode_label = (
+            "Stage 4 estimates size only when every required physical boundary "
+            "is repeatedly observable."
+        )
+    elif mode == "algorithm_candidate":
         release_label = (
             "CANDIDATE · SUCCESS"
             if status == "success"
@@ -915,10 +974,82 @@ def _clip_instance_card(instance: object) -> str:
         release_label = "REFINEMENT NOT RUN"
         mode_label = str(presentation["description"])
     candidate = instance.get("cuboid_candidate_size_lwh")
+    if is_canonical_cuboid and candidate is None:
+        candidate = canonical_cuboid.get("provisional_size_lwh")
     size_label = "no candidate size"
     if isinstance(candidate, (list, tuple)) and len(candidate) == 3:
-        size_label = " x ".join(f"{float(value):.2f}" for value in candidate)
-        size_label += " m"
+        fitted = " x ".join(f"{float(value):.2f}" for value in candidate) + " m"
+        input_size = instance.get("input_median_size_lwh")
+        if isinstance(input_size, (list, tuple)) and len(input_size) == 3:
+            source = " x ".join(f"{float(value):.2f}" for value in input_size)
+            size_label = f"input {source} m → fitted {fitted}"
+        else:
+            size_label = fitted
+        if is_canonical_cuboid and canonical_status != "candidate":
+            size_label += " · provisional diagnostic only"
+    canonical_detail = ""
+    if is_canonical_cuboid:
+        reasons = canonical_cuboid.get("reason_codes")
+        reason_label = (
+            ", ".join(str(value) for value in reasons)
+            if isinstance(reasons, (list, tuple)) and reasons
+            else "all observability gates passed"
+        )
+        face_labels = {
+            "length_lower": "L-",
+            "length_upper": "L+",
+            "width_lower": "W-",
+            "width_upper": "W+",
+            "height_lower_ground": "ground",
+            "height_upper": "H+",
+        }
+        face_parts = []
+        faces = canonical_cuboid.get("face_support")
+        if isinstance(faces, (list, tuple)):
+            for face in faces:
+                if not isinstance(face, Mapping):
+                    continue
+                frame_ids = face.get("supporting_frame_ids")
+                supporting = (
+                    len(frame_ids) if isinstance(frame_ids, (list, tuple)) else 0
+                )
+                required = int(face.get("required_frame_count") or 0)
+                marker = "✓" if face.get("accepted") is True else "✗"
+                name = face_labels.get(str(face.get("face")), str(face.get("face")))
+                face_parts.append(f"{name} {supporting}/{required} {marker}")
+        stability_parts = []
+        center = canonical_cuboid.get("provisional_center_in_registration_xyz")
+        if isinstance(center, (list, tuple)) and len(center) == 3:
+            stability_parts.append(
+                "center Δ "
+                + "/".join(f"{float(value):+.3f}" for value in center)
+                + " m"
+            )
+        yaw = canonical_cuboid.get("provisional_yaw_in_registration_deg")
+        if isinstance(yaw, (int, float)):
+            stability_parts.append(f"yaw Δ {float(yaw):+.3f}°")
+        for key, label in (
+            ("leave_one_out_maximum_dimension_change_m", "LOO Δsize"),
+            ("resolution_maximum_dimension_change_m", "voxel Δsize"),
+        ):
+            values = canonical_cuboid.get(key)
+            if isinstance(values, (list, tuple)) and values:
+                stability_parts.append(
+                    f"{label} {max(float(value) for value in values):.3f} m"
+                )
+        canonical_detail = (
+            '<p class="canonical-detail"><strong>Boundary support:</strong> '
+            f"{html_module.escape(' · '.join(face_parts) or 'not available')}<br>"
+            "<strong>Decision:</strong> "
+            f"{html_module.escape(reason_label)}"
+            + (
+                "<br><strong>Stability:</strong> "
+                + html_module.escape(" · ".join(stability_parts))
+                if stability_parts
+                else ""
+            )
+            + "</p>"
+        )
     preview = html_module.escape(str(instance["preview_path"]), quote=True)
     top = html_module.escape(str(instance["aggregate_top_path"]), quote=True)
     side = html_module.escape(str(instance["aggregate_side_path"]), quote=True)
@@ -981,7 +1112,8 @@ def _clip_instance_card(instance: object) -> str:
     release_warning = (
         '<p class="release-warning">Candidate geometry only; do not use as '
         "an annotation result.</p>"
-        if mode == "algorithm_candidate" and status != "success"
+        if mode == "algorithm_candidate"
+        and (status != "success" or is_canonical_cuboid)
         else ""
     )
     selected_component_point_count = html_module.escape(
@@ -1007,7 +1139,8 @@ def _clip_instance_card(instance: object) -> str:
         f"<p>{frame_count} frames · {point_count} displayed points · "
         f"{selected_component_point_count} "
         "selected component points</p>"
-        f"<p>{html_module.escape(size_label)}</p></article>"
+        f"<p>{html_module.escape(size_label)}</p>"
+        f"{canonical_detail}</article>"
     )
 
 
@@ -1467,7 +1600,7 @@ def _alignment_comparison_mask(
     evidence_state: NDArray[np.uint8] | None,
     preview_frames: list[dict[str, object]],
 ) -> NDArray[np.bool_]:
-    """Restrict Stage 3 A/B to identical selected geometry-component points."""
+    """Restrict aligned-stage A/B to identical geometry-component points."""
 
     mask = np.ones(len(frame_index), dtype=bool)
     if evidence_state is not None:
@@ -1649,8 +1782,8 @@ def _write_thumbnails(
         )
         figure.colorbar(scatter, ax=axis, label="supporting frames")
         axis.set_title(
-            "Persistent shape after anchored aggregation"
-            if algorithm_stage == "anchored_component_aggregation_v2"
+            "Persistent shape after observable component aggregation"
+            if algorithm_stage in ALIGNED_COMPONENT_STAGES
             else "Canonical shape after alternating registration"
         )
         axis.set_xlabel("canonical X (m)")
@@ -1672,7 +1805,11 @@ def _write_thumbnails(
                 0,
                 1,
                 "#d500f9",
-                "visible-envelope candidate",
+                (
+                    "observable canonical cuboid candidate"
+                    if algorithm_stage == "observable_canonical_cuboid_v4_experiment"
+                    else "visible-envelope candidate"
+                ),
             )
             axis.legend(loc="best")
         figure.savefig(output / "canonical_registration_top.png", dpi=140)
@@ -1831,12 +1968,13 @@ def _write_html(
         ) from error
 
     evidence_title, evidence_labels = _evidence_presentation(trace)
-    is_component_stage = trace is not None and trace.stage in {
-        "component_selection_v2",
-        "anchored_component_aggregation_v2",
-    }
-    is_anchored_stage = (
-        trace is not None and trace.stage == "anchored_component_aggregation_v2"
+    is_component_stage = trace is not None and trace.stage in COMPONENT_TRACE_STAGES
+    is_anchored_stage = trace is not None and trace.stage in ALIGNED_COMPONENT_STAGES
+    is_pose_graph_stage = (
+        trace is not None and trace.stage == "pose_graph_aggregation_v3_experiment"
+    )
+    is_canonical_cuboid_stage = (
+        trace is not None and trace.stage == "observable_canonical_cuboid_v4_experiment"
     )
     alignment_mask = _alignment_comparison_mask(
         aggregate_frame_index, aggregate_evidence_state, preview_frames
@@ -1936,7 +2074,11 @@ def _write_html(
             "#00b8d4",
         )
     aggregate_title = (
-        "AFTER · anchored V2 component aggregate (provisional)"
+        "AFTER · V4 observable canonical-cuboid alignment (not released)"
+        if is_canonical_cuboid_stage
+        else "AFTER · V3 observable pose-graph aggregate (experimental)"
+        if is_pose_graph_stage
+        else "AFTER · anchored V2 component aggregate (provisional)"
         if is_anchored_stage
         else "Input-track-aligned V2 component preview (no registration performed)"
         if is_component_stage
@@ -2025,7 +2167,11 @@ def _write_html(
         )
         canonical_figure.update_layout(
             title=(
-                "Persistent shape after anchored aggregation"
+                "Persistent shape used by V4 canonical cuboid estimation"
+                if is_canonical_cuboid_stage
+                else "Persistent shape after V3 pose-graph aggregation"
+                if is_pose_graph_stage
+                else "Persistent shape after anchored aggregation"
                 if is_anchored_stage
                 else "Canonical shape after alternating registration"
             ),
@@ -2045,7 +2191,11 @@ def _write_html(
                     trace.cuboid_fit.canonical_size_lwh,
                     (0.0, 0.0, 0.0, 1.0),
                 ),
-                "visible-envelope candidate",
+                (
+                    "observable canonical cuboid candidate"
+                    if is_canonical_cuboid_stage
+                    else "visible-envelope candidate"
+                ),
                 "#d500f9",
             )
 
@@ -2178,6 +2328,20 @@ def _write_html(
         if trace is not None
         else "No algorithm evidence trace for this case."
     )
+    canonical_cuboid = _canonical_cuboid_diagnostics(
+        outcome_to_dict(case.case_id, outcome)
+    )
+    canonical_decision_display = "not run"
+    if canonical_cuboid is not None:
+        reason_codes = canonical_cuboid.get("reason_codes")
+        reason_text = (
+            ", ".join(str(value) for value in reason_codes)
+            if isinstance(reason_codes, (list, tuple)) and reason_codes
+            else "all observability gates passed"
+        )
+        canonical_decision_display = (
+            f"{canonical_cuboid.get('status', 'unknown')} · {reason_text}"
+        )
     case_display = html_module.escape(case.case_id)
     track_display = html_module.escape(case.track.track_id)
     source_display = html_module.escape(data_source)
@@ -2204,7 +2368,11 @@ def _write_html(
         else [
             (
                 "algorithm",
-                "Anchored component aggregate"
+                "V4 canonical cuboid aggregate"
+                if is_canonical_cuboid_stage
+                else "V3 pose-graph aggregate"
+                if is_pose_graph_stage
+                else "Anchored component aggregate"
                 if is_anchored_stage
                 else "Input-track aggregate"
                 if is_component_stage
@@ -2221,7 +2389,7 @@ def _write_html(
         view_tabs.append(
             (
                 "evidence",
-                "V2 component selection" if is_component_stage else "Current evidence",
+                evidence_title if is_component_stage else "Current evidence",
                 evidence_html,
             )
         )
@@ -2292,6 +2460,8 @@ def _write_html(
   <p><strong>Algorithm stage:</strong> {algorithm_stage_display}</p>
   <p><strong>Frame roles:</strong> {role_counts_display}</p>
   <p><strong>Trace-only cuboid candidate:</strong> {candidate_display}</p>
+  <p><strong>Stage 4 cuboid decision:</strong>
+    {html_module.escape(canonical_decision_display)}</p>
   <nav class="view-tabs">{view_buttons}</nav>
   {view_panels}
   <section>
