@@ -34,6 +34,14 @@ rejectable; a regressing proposal retains the exact coarse pose. It returns
 `insufficient_evidence` until canonical size, fixed-size pose refinement, and
 final acceptance gates are implemented.
 
+The normal-aware Stage 3 pose graph and observable Stage 4 canonical-cuboid
+estimator are available as explicit experiment APIs. Stage 4 requires repeated
+support for all physical boundaries, records leave-one-frame-out and
+resolution stability, and rejects a missing opposing face instead of using a
+model/category size fallback. These experiments still do not publish
+`RefinementSuccess`; reviewed-target calibration and fixed-shape per-frame pose
+refinement remain required.
+
 The current default is a dense-first MVP profile. Only same-track frames with
 at least 1,000 selected component points and strong relative spatial support
 may define geometry, and a track needs five such frames. Sparse tracks remain
@@ -129,6 +137,18 @@ build_controlled_recovery_bundle(
     data_source="frozen detector track",
 )
 ```
+
+An accepted V3 trace can be passed to the Stage 4 sizing experiment:
+
+```python
+from trackrefinery import fit_observable_canonical_cuboid
+
+size_run = fit_observable_canonical_cuboid(case, stage3_trace)
+print(size_run.canonical_cuboid.status)
+print(size_run.canonical_cuboid.provisional_size_lwh)
+```
+
+The value is an experimental diagnostic, not a released annotation result.
 
 Its REFERENCE view is only the frozen model-track proxy used by the evaluator;
 it is not reviewed gold, and its poses are not available to the perturbed

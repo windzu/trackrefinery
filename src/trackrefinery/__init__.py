@@ -2,18 +2,25 @@
 
 from trackrefinery.adapters import X4DInferenceExport, export_x4d_clip_inference
 from trackrefinery.component_consensus import (
+    CANONICAL_CUBOID_EXPERIMENT_CONTRACT,
+    CANONICAL_CUBOID_STAGE,
     COMPONENT_CONSENSUS_ALGORITHM_VERSION,
     COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION,
     POSE_GRAPH_EXPERIMENT_CONTRACT,
     POSE_GRAPH_VARIANTS,
+    CanonicalCuboidExperimentRun,
+    CanonicalCuboidExperimentSettings,
+    CanonicalCuboidExperimentTrace,
     ComponentConsensusRefiner,
     ComponentConsensusSettings,
+    CuboidFaceSupportTrace,
     PoseGraphAggregationRun,
     PoseGraphEdgeTrace,
     PoseGraphExperimentSettings,
     PoseGraphExperimentTrace,
     aggregate_geometry_components,
     aggregate_geometry_components_pose_graph,
+    fit_observable_canonical_cuboid,
     select_object_components,
 )
 from trackrefinery.contracts import (
@@ -91,6 +98,8 @@ from trackrefinery.serde import read_outcome, write_outcome
 from trackrefinery.targets import GoldFramePose, GoldTarget, TargetDataset
 
 __all__ = [
+    "CANONICAL_CUBOID_EXPERIMENT_CONTRACT",
+    "CANONICAL_CUBOID_STAGE",
     "COMPONENT_CONSENSUS_ALGORITHM_VERSION",
     "COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION",
     "CONTROLLED_RECOVERY_CONTRACT",
@@ -107,6 +116,9 @@ __all__ = [
     "AnchoredAggregationTrace",
     "BenchmarkReport",
     "Box3D",
+    "CanonicalCuboidExperimentRun",
+    "CanonicalCuboidExperimentSettings",
+    "CanonicalCuboidExperimentTrace",
     "CanonicalShapeTrace",
     "ComponentConsensusRefiner",
     "ComponentConsensusSettings",
@@ -115,6 +127,7 @@ __all__ = [
     "ControlledPerturbationProfile",
     "ControlledRecoveryReport",
     "ControlledRecoveryRun",
+    "CuboidFaceSupportTrace",
     "CuboidFitTrace",
     "EnvelopeFittingSettings",
     "EvaluationReport",
@@ -161,6 +174,7 @@ __all__ = [
     "evaluate_suite",
     "export_x4d_clip_inference",
     "fit_alternating_envelope",
+    "fit_observable_canonical_cuboid",
     "read_geometric_trace",
     "read_outcome",
     "register_canonical_shape",

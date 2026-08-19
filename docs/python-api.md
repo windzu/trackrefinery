@@ -174,6 +174,27 @@ trackrefinery-build-controlled-recovery-suite \
   --output review/recovery
 ```
 
+## Inspect the experimental Stage 4 canonical cuboid
+
+Stage 4 accepts only an observable V3 pose-graph trace. It returns a trace and
+an experiment sidecar, not a public refinement success:
+
+```python
+from trackrefinery import fit_observable_canonical_cuboid
+
+size_run = fit_observable_canonical_cuboid(case, stage3_trace)
+print(size_run.canonical_cuboid.status)
+print(size_run.canonical_cuboid.reason_codes)
+print(size_run.canonical_cuboid.provisional_size_lwh)
+size_run.canonical_cuboid.write_json("traces/case/canonical-cuboid.json")
+```
+
+An accepted experiment applies one common center/yaw transform to every Stage
+3 geometry pose and exposes one common size in `size_run.trace.cuboid_fit`. A
+rejected run may retain a provisional size in the sidecar for diagnosis, but
+its trace contains no materialized candidate dimensions. The estimator does
+not read coarse dimensions, category priors, sensor rays, or annotations.
+
 ## Load source-only input
 
 ```python
