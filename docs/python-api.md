@@ -181,6 +181,12 @@ separate target includes an `Annotation aggregate` tab made from the same
 display points aligned by gold poses. This is a review-only artifact and does
 not change the source-only inference contract.
 
+The real-Clip catalog uses prominent mode badges and filters to distinguish
+algorithm candidates, frozen model-track baselines, and annotation references.
+All card images are multi-frame aggregates and name their alignment source.
+Algorithm cards keep their aligned top and side views together and add the
+cross-frame-supported canonical shape as a separately labeled third view.
+
 The CLI accepts the same sidecar through
 `trackrefinery-build-review --trace traces/case/evidence_trace.json ...`.
 

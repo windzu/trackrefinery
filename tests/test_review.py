@@ -271,12 +271,24 @@ def test_clip_review_suite_groups_instances_as_cards_under_clip_tabs(
         "source_annotation_reference"
     )
     assert manifest["clips"][1]["instances"][0]["aggregate_top_label"] == (
-        "Annotation-aligned aggregate"
+        "Annotation alignment · TOP aggregate"
     )
+    assert manifest["clips"][1]["instances"][0]["aggregate_side_label"] == (
+        "Annotation alignment · SIDE aggregate"
+    )
+    assert manifest["clips"][0]["instances"][0]["review_mode"] == (
+        "algorithm_candidate"
+    )
+    assert manifest["clips"][0]["instances"][0]["canonical_top_path"]
     html = (output / "index.html").read_text(encoding="utf-8")
     assert html.count('<button class="clip-tab') == 2
-    assert html.count('<article class="instance-card"') == 3
-    assert "source annotation reference · not gold · not refined" in html
+    assert html.count('<article class="instance-card ') == 3
+    assert "Every image below is a multi-frame" in html
+    assert "ALGORITHM CANDIDATE" in html
+    assert "MODEL TRACK BASELINE" in html
+    assert "ANNOTATION REFERENCE" in html
+    assert 'data-review-mode="source_annotation_reference"' in html
+    assert "REFINEMENT NOT RUN" in html
 
     status = build_clip_review_suite_main(
         [

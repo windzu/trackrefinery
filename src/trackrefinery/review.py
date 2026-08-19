@@ -59,6 +59,24 @@ REVIEW_MODES = frozenset(
 )
 REVIEW_DETAIL_LEVELS = frozenset({"catalog", "full"})
 
+REVIEW_MODE_PRESENTATION = {
+    "algorithm_candidate": {
+        "badge": "ALGORITHM CANDIDATE",
+        "label": "TrackRefinery algorithm registration",
+        "description": "Algorithm output; success is eligible for review, not release",
+    },
+    "model_candidate_baseline": {
+        "badge": "MODEL TRACK BASELINE",
+        "label": "Inference + tracking baseline",
+        "description": "Frozen model track; refinement was not run",
+    },
+    "source_annotation_reference": {
+        "badge": "ANNOTATION REFERENCE",
+        "label": "Source annotation reference",
+        "description": "Annotation-aligned review reference; not gold and not refined",
+    },
+}
+
 
 def build_review_bundle(
     case: RefinementCase,
@@ -392,6 +410,11 @@ def build_clip_review_suite(
             raise ValueError(f"Clip {clip_id!r} requires at least one instance")
         instances.sort(
             key=lambda row: (
+                {
+                    "algorithm_candidate": 0,
+                    "model_candidate_baseline": 1,
+                    "source_annotation_reference": 2,
+                }.get(str(row.get("review_mode")), 3),
                 -int(row.get("frame_count") or 0),
                 str(row.get("category") or ""),
                 str(row["case_id"]),
@@ -445,17 +468,14 @@ def _review_bundle_index_row(
     if case_id in seen_case_ids:
         raise ValueError(f"duplicate review case_id: {case_id}")
     seen_case_ids.add(case_id)
-    canonical_top = bundle / "thumbnails" / "canonical_registration_top.png"
     review_mode = manifest.get("review_mode", "algorithm_candidate")
-    if canonical_top.is_file():
-        top_path = canonical_top
-        top_label = "Canonical registered aggregate"
+    canonical_top = bundle / "thumbnails" / "canonical_registration_top.png"
+    if review_mode == "algorithm_candidate":
+        alignment_label = "Algorithm registration"
     elif review_mode == "source_annotation_reference":
-        top_path = top
-        top_label = "Annotation-aligned aggregate"
+        alignment_label = "Annotation alignment"
     else:
-        top_path = top
-        top_label = "Coarse-track-aligned aggregate"
+        alignment_label = "Inference-track alignment"
     return {
         "case_id": case_id,
         "track_id": manifest.get("track_id"),
@@ -468,22 +488,42 @@ def _review_bundle_index_row(
         "has_gold_aligned_aggregate": manifest.get("has_gold_aligned_aggregate", False),
         "cuboid_candidate_size_lwh": manifest.get("cuboid_candidate_size_lwh"),
         "preview_path": (relative / "preview.html").as_posix(),
-        "aggregate_top_path": top_path.relative_to(output).as_posix(),
-        "aggregate_top_label": top_label,
+        "aggregate_top_path": top.relative_to(output).as_posix(),
+        "aggregate_top_label": f"{alignment_label} · TOP aggregate",
         "aggregate_side_path": (
             relative / "thumbnails" / "aggregate_side.png"
         ).as_posix(),
+        "aggregate_side_label": f"{alignment_label} · SIDE aggregate",
+        "canonical_top_path": (
+            canonical_top.relative_to(output).as_posix()
+            if canonical_top.is_file()
+            else None
+        ),
+        "canonical_top_label": (
+            "Cross-frame-supported canonical shape · TOP"
+            if canonical_top.is_file()
+            else None
+        ),
     }
 
 
 def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
     buttons: list[str] = []
     panels: list[str] = []
+    mode_counts = {mode: 0 for mode in REVIEW_MODES}
     for clip_index, clip in enumerate(clips):
         clip_id = str(clip["clip_id"])
         instances = clip["instances"]
         if not isinstance(instances, list):
             raise ValueError("Clip instances must be a list")
+        clip_mode_counts = {mode: 0 for mode in REVIEW_MODES}
+        for instance in instances:
+            if not isinstance(instance, dict):
+                raise ValueError("Clip instance row must be an object")
+            mode = str(instance.get("review_mode") or "algorithm_candidate")
+            if mode in clip_mode_counts:
+                clip_mode_counts[mode] += 1
+                mode_counts[mode] += 1
         active = " active" if clip_index == 0 else ""
         buttons.append(
             f'<button class="clip-tab{active}" '
@@ -492,13 +532,44 @@ def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
             f"<small>{len(instances)} instances</small></button>"
         )
         cards = [_clip_instance_card(instance) for instance in instances]
+        count_badges = "".join(
+            f'<span class="count-badge mode-{html_module.escape(mode)}">'
+            f"{html_module.escape(str(REVIEW_MODE_PRESENTATION[mode]['label']))}: "
+            f"{clip_mode_counts[mode]}</span>"
+            for mode in (
+                "algorithm_candidate",
+                "model_candidate_baseline",
+                "source_annotation_reference",
+            )
+            if clip_mode_counts[mode]
+        )
         panels.append(
             f'<section id="clip-{clip_index}" class="clip-panel{active}">'
-            f'<div class="clip-summary"><strong>{html_module.escape(clip_id)}</strong>'
-            f"<span>{len(instances)} / {len(instances)} instances shown</span></div>"
+            '<div class="clip-summary"><div><strong>'
+            f"{html_module.escape(clip_id)}</strong>"
+            f'<div class="clip-mode-counts">{count_badges}</div></div>'
+            f'<span><b class="shown-count">{len(instances)}</b> / {len(instances)} '
+            "instances shown</span></div>"
             f'<div class="instance-grid">{"".join(cards)}</div></section>'
         )
     title_display = html_module.escape(title)
+    filter_buttons = [
+        '<button class="filter-button active" data-mode="all" '
+        "onclick=\"filterMode('all', this)\">ALL "
+        f"{sum(mode_counts.values())}</button>"
+    ]
+    for mode in (
+        "algorithm_candidate",
+        "model_candidate_baseline",
+        "source_annotation_reference",
+    ):
+        presentation = REVIEW_MODE_PRESENTATION[mode]
+        filter_buttons.append(
+            f'<button class="filter-button mode-{mode}" data-mode="{mode}" '
+            f"onclick=\"filterMode('{mode}', this)\">"
+            f"{html_module.escape(str(presentation['badge']))} "
+            f"{mode_counts[mode]}</button>"
+        )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -508,7 +579,7 @@ def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
   <style>
     * {{ box-sizing: border-box; }}
     body {{ font-family: system-ui; margin: 0; background: #0b1120; color: #e5e7eb; }}
-    header {{ position: sticky; top: 0; z-index: 5; padding: 14px 18px 8px;
+    header {{ position: sticky; top: 0; z-index: 5; padding: 14px 18px 10px;
       background: rgba(11,17,32,.97); border-bottom: 1px solid #263349; }}
     h1 {{ margin: 0 0 12px; font-size: 22px; }}
     nav {{ display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }}
@@ -518,24 +589,47 @@ def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
     .clip-tab small, .instance-head small {{ display: block; color: #94a3b8;
       margin-top: 3px; overflow: hidden; text-overflow: ellipsis; }}
     .clip-tab.active {{ background: #1d4ed8; border-color: #60a5fa; }}
+    .catalog-explainer {{ margin: 0 0 10px; color: #cbd5e1; font-size: 13px; }}
+    .catalog-explainer strong {{ color: #f8fafc; }}
+    .filters {{ display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }}
+    .filter-button {{ border: 1px solid #475569; border-radius: 999px;
+      padding: 6px 10px; background: #172033; color: #cbd5e1; cursor: pointer;
+      font-size: 11px; font-weight: 750; letter-spacing: .02em; }}
+    .filter-button.active {{ color: #fff; border-color: #f8fafc;
+      box-shadow: 0 0 0 2px rgba(248,250,252,.16); }}
     main {{ padding: 16px 18px 32px; }}
     .clip-panel {{ display: none; }} .clip-panel.active {{ display: block; }}
     .clip-summary {{ display: flex; justify-content: space-between; gap: 12px;
       margin-bottom: 14px; color: #cbd5e1; }}
+    .clip-mode-counts {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }}
+    .count-badge {{ border-radius: 999px; padding: 3px 7px; font-size: 10px;
+      border: 1px solid currentColor; }}
     .instance-grid {{ display: grid; grid-template-columns:
       repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; }}
     .instance-card {{ overflow: hidden; border: 1px solid #334155;
       border-radius: 12px; background: #111827; cursor: pointer; padding: 12px; }}
+    .instance-card.mode-algorithm_candidate {{ border-left: 6px solid #e879f9; }}
+    .instance-card.mode-model_candidate_baseline {{ border-left: 6px solid #38bdf8; }}
+    .instance-card.mode-source_annotation_reference {{
+      border-left: 6px solid #fbbf24; }}
     .instance-card:hover {{ border-color: #60a5fa; transform: translateY(-1px); }}
     .instance-head {{ display: flex; justify-content: space-between; gap: 12px;
       margin-bottom: 8px; }}
     .status {{ color: #bfdbfe; font-size: 12px; }}
+    .mode-badge {{ display: inline-block; margin-bottom: 8px; border-radius: 5px;
+      padding: 4px 7px; font-size: 11px; font-weight: 800; letter-spacing: .04em;
+      border: 1px solid currentColor; }}
+    .mode-algorithm_candidate {{ color: #f0abfc; }}
+    .mode-model_candidate_baseline {{ color: #7dd3fc; }}
+    .mode-source_annotation_reference {{ color: #fcd34d; }}
     .views {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }}
+    .views.three {{ grid-template-columns: repeat(3, 1fr); }}
     figure {{ margin: 0; background: white; border-radius: 7px; overflow: hidden; }}
     img {{ display: block; width: 100%; aspect-ratio: 8/5; object-fit: contain; }}
     figcaption {{ color: #334155; font-size: 11px; padding: 3px 7px 5px; }}
     .instance-card p {{ margin: 7px 0 0; color: #94a3b8; font-size: 12px; }}
-    .instance-card .mode {{ color: #fbbf24; }}
+    .instance-card .mode {{ color: #cbd5e1; }}
+    .release-warning {{ color: #fca5a5 !important; font-weight: 700; }}
     dialog {{ width: min(1500px, 96vw); height: 94vh; padding: 0;
       border: 1px solid #475569; border-radius: 10px; background: #111827; }}
     dialog::backdrop {{ background: rgba(0,0,0,.75); }}
@@ -546,7 +640,14 @@ def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
   </style>
 </head>
 <body>
-  <header><h1>{title_display}</h1><nav>{"".join(buttons)}</nav></header>
+  <header><h1>{title_display}</h1>
+    <p class="catalog-explainer"><strong>Every image below is a multi-frame
+    point-cloud aggregate.</strong>
+    The badge and caption state whether points are aligned by model tracking,
+    TrackRefinery registration, or source annotation. An algorithm success is
+    eligible for caller review; it is never an automatic release.</p>
+    <div class="filters">{"".join(filter_buttons)}</div>
+    <nav>{"".join(buttons)}</nav></header>
   <main>{"".join(panels)}</main>
   <dialog id="instance-dialog"><div class="dialog-head">
     <strong id="dialog-title">Instance</strong>
@@ -560,6 +661,20 @@ def _clip_suite_html(title: str, clips: list[dict[str, object]]) -> str:
       element => element.classList.remove('active'));
     document.getElementById('clip-' + index).classList.add('active');
     button.classList.add('active');
+  }}
+  function filterMode(mode, button) {{
+    document.querySelectorAll('.filter-button').forEach(
+      element => element.classList.remove('active'));
+    button.classList.add('active');
+    document.querySelectorAll('.clip-panel').forEach(panel => {{
+      let shown = 0;
+      panel.querySelectorAll('.instance-card').forEach(card => {{
+        const visible = mode === 'all' || card.dataset.reviewMode === mode;
+        card.hidden = !visible;
+        if (visible) shown += 1;
+      }});
+      panel.querySelector('.shown-count').textContent = shown;
+    }});
   }}
   function openInstance(path, caseId) {{
     document.getElementById('dialog-title').textContent = caseId;
@@ -585,12 +700,17 @@ def _clip_instance_card(instance: object) -> str:
     point_count = html_module.escape(str(instance.get("aggregate_point_count") or "?"))
     status = str(instance.get("outcome_status") or "unknown")
     mode = str(instance.get("review_mode") or "algorithm_candidate")
-    if mode == "source_annotation_reference":
-        mode_label = "source annotation reference · not gold · not refined"
-    elif mode == "model_candidate_baseline":
-        mode_label = "model track baseline · refinement not run"
+    presentation = REVIEW_MODE_PRESENTATION[mode]
+    if mode == "algorithm_candidate":
+        release_label = (
+            "CANDIDATE · SUCCESS"
+            if status == "success"
+            else f"NOT RELEASED · {status.replace('_', ' ').upper()}"
+        )
+        mode_label = str(presentation["description"])
     else:
-        mode_label = "model track · TrackRefinery development result"
+        release_label = "REFINEMENT NOT RUN"
+        mode_label = str(presentation["description"])
     candidate = instance.get("cuboid_candidate_size_lwh")
     size_label = "no candidate size"
     if isinstance(candidate, (list, tuple)) and len(candidate) == 3:
@@ -602,20 +722,47 @@ def _clip_instance_card(instance: object) -> str:
     top_label = html_module.escape(
         str(instance.get("aggregate_top_label") or "Top aggregate")
     )
+    side_label = html_module.escape(
+        str(instance.get("aggregate_side_label") or "Side aggregate")
+    )
+    figures = [
+        f'<figure><img loading="lazy" src="{top}" alt="{top_label}">'
+        f"<figcaption>{top_label}</figcaption></figure>",
+        f'<figure><img loading="lazy" src="{side}" alt="{side_label}">'
+        f"<figcaption>{side_label}</figcaption></figure>",
+    ]
+    canonical = instance.get("canonical_top_path")
+    if isinstance(canonical, str) and canonical:
+        canonical_path = html_module.escape(canonical, quote=True)
+        canonical_label = html_module.escape(
+            str(instance.get("canonical_top_label") or "Canonical shape · TOP")
+        )
+        figures.append(
+            f'<figure><img loading="lazy" src="{canonical_path}" '
+            f'alt="{canonical_label}"><figcaption>{canonical_label}</figcaption>'
+            "</figure>"
+        )
+    views_class = "views three" if len(figures) == 3 else "views"
+    release_warning = (
+        '<p class="release-warning">Candidate geometry only; do not use as '
+        "an annotation result.</p>"
+        if mode == "algorithm_candidate" and status != "success"
+        else ""
+    )
     return (
-        '<article class="instance-card" '
+        f'<article class="instance-card mode-{html_module.escape(mode)}" '
+        f'data-review-mode="{html_module.escape(mode, quote=True)}" '
         f'onclick="openInstance({html_module.escape(json.dumps(preview), quote=True)}, '
         f'{html_module.escape(json.dumps(case_id), quote=True)})">'
+        f'<span class="mode-badge mode-{html_module.escape(mode)}">'
+        f"{html_module.escape(str(presentation['badge']))}</span>"
         '<div class="instance-head">'
         f"<div><strong>{html_module.escape(category)}</strong>"
         f"<small>{html_module.escape(track_id)}</small></div>"
-        f'<span class="status">{html_module.escape(status)}</span></div>'
-        '<div class="views">'
-        f'<figure><img loading="lazy" src="{top}" alt="{top_label}">'
-        f"<figcaption>{top_label}</figcaption></figure>"
-        f'<figure><img loading="lazy" src="{side}" alt="Side aggregate">'
-        "<figcaption>Side aggregate</figcaption></figure></div>"
+        f'<span class="status">{html_module.escape(release_label)}</span></div>'
+        f'<div class="{views_class}">{"".join(figures)}</div>'
         f'<p class="mode">{html_module.escape(mode_label)}</p>'
+        f"{release_warning}"
         f"<p>{frame_count} frames · {point_count} displayed points</p>"
         f"<p>{html_module.escape(size_label)}</p></article>"
     )

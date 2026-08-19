@@ -169,9 +169,20 @@ generation must not select only favorable examples.
 Real development review uses a different Clip-level catalog contract,
 `trackrefinery-clip-review-suite-v1`. Each top-level tab is exactly one source
 Clip, and that tab tiles every instance bundle from the Clip. Cards are ordered
-by observation count and show fixed top/side aggregate views; selecting a card
+with algorithm candidates first and then by observation count; selecting a card
 opens its instance detail bundle. The catalog must not create one outer tab per
 instance or hide short, failed, unsupported, or insufficient-evidence tracks.
+
+Every catalog thumbnail is explicitly labeled as a multi-frame aggregate. Mode
+badges, colored card borders, counts, and filters distinguish TrackRefinery
+algorithm candidates, frozen inference-and-tracking baselines, and source
+annotation references. Top and side thumbnails on one card must use the same
+alignment source. When an algorithm bundle has a canonical shape, the card adds
+it as a third, separately labeled view instead of substituting it for only one
+of the aligned top/side views. An unsuccessful algorithm outcome must be marked
+not released and must not visually resemble an accepted annotation result. A
+successful outcome remains a candidate for caller review; the catalog never
+claims that it has been released.
 
 Catalog cards name their alignment source. A frozen model track may be shown
 as a coarse-track baseline before refinement. Current source annotations may
