@@ -1,6 +1,7 @@
 # Component-Consensus Geometric Refinement V2
 
-Status: accepted replacement design; implementation not started
+Status: accepted replacement design; component extraction and provisional
+frame-role trace implemented
 
 ## Decision
 
@@ -298,12 +299,14 @@ dimensions, and the exact rejection reason.
 
 ## Implementation sequence
 
-1. Preserve V1 as a named legacy trace baseline and prevent it from being
-   mistaken for the current backend.
-2. Add V2 trace contracts for components, frame roles, alignment decisions,
-   baseline/candidate sharpness, and dimension stability.
-3. Implement deterministic ground removal and component selection; validate it
-   visually on every real Clip catalog instance before registration work.
+1. **Implemented:** preserve V1 as a named legacy trace baseline and prevent it
+   from being mistaken for the current backend.
+2. **Partly implemented:** add V2 trace contracts. Component decisions and
+   frame roles are present; alignment, sharpness, and dimension-stability fields
+   arrive with their owning stages.
+3. **Implemented, pending real-catalog review:** deterministic ground removal,
+   3D component selection, resolution-stability measurement, and conservative
+   merged-component rejection.
 4. Implement frame-role classification and anchored geometry-frame
    aggregation, retaining baseline poses when a candidate alignment regresses.
 5. Implement canonical size fitting and leave-one-frame-out stability.

@@ -1,6 +1,13 @@
 """Public API for single-instance, multi-frame 3D refinement."""
 
 from trackrefinery.adapters import X4DInferenceExport, export_x4d_clip_inference
+from trackrefinery.component_consensus import (
+    COMPONENT_CONSENSUS_ALGORITHM_VERSION,
+    COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION,
+    ComponentConsensusRefiner,
+    ComponentConsensusSettings,
+    select_object_components,
+)
 from trackrefinery.contracts import (
     Box3D,
     FrameCloud,
@@ -31,8 +38,10 @@ from trackrefinery.geometric import (
     EnvelopeFittingSettings,
     EvidenceSelectionSettings,
     EvidenceState,
+    FrameComponentTrace,
     FrameEvidenceTrace,
     FrameRegistrationTrace,
+    FrameRole,
     GeometricRefinementRun,
     GeometricRefinementSettings,
     GeometricRefinementTrace,
@@ -56,6 +65,8 @@ from trackrefinery.serde import read_outcome, write_outcome
 from trackrefinery.targets import GoldFramePose, GoldTarget, TargetDataset
 
 __all__ = [
+    "COMPONENT_CONSENSUS_ALGORITHM_VERSION",
+    "COMPONENT_CONSENSUS_CONFIG_SCHEMA_VERSION",
     "EVIDENCE_TRACE_CONTRACT",
     "GEOMETRIC_ALGORITHM_VERSION",
     "GEOMETRIC_CONFIG_SCHEMA_VERSION",
@@ -63,14 +74,18 @@ __all__ = [
     "BenchmarkReport",
     "Box3D",
     "CanonicalShapeTrace",
+    "ComponentConsensusRefiner",
+    "ComponentConsensusSettings",
     "CuboidFitTrace",
     "EnvelopeFittingSettings",
     "EvaluationReport",
     "EvidenceSelectionSettings",
     "EvidenceState",
     "FrameCloud",
+    "FrameComponentTrace",
     "FrameEvidenceTrace",
     "FrameRegistrationTrace",
+    "FrameRole",
     "GeometricRefinementRun",
     "GeometricRefinementSettings",
     "GeometricRefinementTrace",
@@ -103,6 +118,7 @@ __all__ = [
     "read_outcome",
     "register_canonical_shape",
     "select_initial_evidence",
+    "select_object_components",
     "validate_geometric_trace",
     "validate_outcome",
     "write_geometric_trace",

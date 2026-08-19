@@ -25,7 +25,12 @@ The accepted algorithm direction is
 extract one object component per usable frame, aggregate only reliable frames,
 fit one canonical size, and refine every frame pose with that size fixed. It
 does not use learned priors, sensor rays, free-space, or occupancy modeling.
-V2 is designed but not yet implemented.
+The `ComponentConsensusRefiner` now implements its first gated stage: bounded
+ROI and ground handling, deterministic 3D component extraction, cross-resolution
+selection stability, conservative merged-component rejection, and provisional
+`geometry` / `pose_only` / `trajectory_only` frame roles. It returns
+`insufficient_evidence` until aggregation, canonical size, fixed-size pose
+refinement, and acceptance gates are implemented.
 
 The existing `JointCuboidRefiner` implements the rejected
 [V1 experimental design](docs/geometric-refinement-v1.md). It is retained as a
@@ -70,6 +75,18 @@ build_review_bundle(
     trace=run.trace,
     data_source="synthetic-v1",  # or the real dataset/Clip identifier
 )
+```
+
+The V2 component stage is independently inspectable without claiming a
+refinement result:
+
+```python
+from trackrefinery import ComponentConsensusRefiner
+
+run = ComponentConsensusRefiner().refine_with_trace(case)
+assert run.trace.stage == "component_selection_v2"
+for frame in run.trace.frames:
+    print(frame.frame_id, frame.component.status, frame.component.frame_role)
 ```
 
 Multiple case bundles can be placed under one directory and exposed through a

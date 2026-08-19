@@ -75,6 +75,31 @@ are versioned algorithm configuration, not a caller-owned crop request.
 Install `trackrefinery[geometric]` before invoking this backend; importing the
 base package and using its contracts remains NumPy-only.
 
+## Inspect the V2 component stage
+
+The accepted backend currently stops after selecting one object component per
+frame and assigning provisional frame roles. A green `target` state in the
+portable evidence enum means `selected object component` for this V2 stage;
+orange means a competing or inseparable component. It does not perform
+registration or estimate dimensions yet:
+
+```python
+from trackrefinery import ComponentConsensusRefiner, write_geometric_trace
+
+run = ComponentConsensusRefiner().refine_with_trace(case)
+assert run.outcome.status == "insufficient_evidence"
+assert run.trace.stage == "component_selection_v2"
+for frame in run.trace.frames:
+    decision = frame.component
+    print(frame.frame_id, decision.status, decision.frame_role)
+write_geometric_trace("traces/v2-component-case", run.trace)
+```
+
+The review bundle renders explicit `selected object component`, `competing /
+inseparable component`, `other ROI points`, and `removed ground` labels. Its
+aggregate remains input-track aligned and is marked `no registration
+performed`.
+
 ## Load source-only input
 
 ```python
