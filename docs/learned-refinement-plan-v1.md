@@ -1,6 +1,14 @@
 # Learned Track Refinement Plan V1
 
-Status: accepted implementation plan; no learned backend is release-qualified
+Status: superseded research plan; retained for historical comparison; no
+learned backend is release-qualified
+
+> This direct trajectory box-regression direction was superseded by the
+> [object-centric foundation exploration](object-centric-foundation-exploration-v1.md).
+> In particular, production detector tracks are no longer the primary training
+> distribution, and `delta_log_lwh` is retained only as a negative-control
+> baseline. Do not implement the milestones in this document as the current
+> architecture.
 
 ## Decision
 

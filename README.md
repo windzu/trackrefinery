@@ -20,11 +20,12 @@ The framework is usable as an installable Python package. It contains the
 validated public contracts, source/target-isolated datasets, deterministic
 fixtures, quantitative evaluation, and visual review bundles.
 
-Real-data review has moved the accepted production research direction to the
-[size-first learned trajectory plan](docs/learned-refinement-plan-v1.md). The
-first learned milestone estimates one canonical `length/width/height` from a
-complete track and must beat reviewed coarse and geometric baselines before a
-per-frame pose head is developed. No learned backend is release-qualified yet.
+Real-data review has moved the current research direction to an
+[object-centric foundation exploration](docs/object-centric-foundation-exploration-v1.md).
+It first tests whether a model can learn a complete canonical shape while
+separating metric scale, per-frame pose, and sensor/visibility sampling. Direct
+trajectory box regression is retained only as a negative-control baseline.
+No learned backend is release-qualified yet.
 
 [Component-Consensus Geometric Refinement V2](docs/geometric-refinement-v2.md)
 is retained as a frozen comparison and diagnostic direction. It does not act

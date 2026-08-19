@@ -7,9 +7,15 @@ fixed-size per-frame pose diagnostics remain
 
 ## What “good” means
 
-A result is good only when its canonical size and every evaluated frame pose
-are within the agreed correction tolerance. Improvement in average IoU is not
-enough if the output still needs manual geometry edits.
+A product result is good only when a reviewer accepts the complete instance
+track without moving, rotating, resizing, or otherwise editing any released
+box. If one released frame requires one geometry edit, the track is
+`needs_edit`. Improvement in average IoU or entry into a numeric tolerance is
+not sufficient.
+
+Canonical-size, pose, and IoU tolerances remain mandatory development
+diagnostics and may be conservative prerequisites for candidate release. They
+do not replace the literal human `accept_as_is` outcome.
 
 Evaluation compares the same frozen input track before and after refinement:
 
@@ -54,7 +60,7 @@ can fit visible points while having an incorrect occluded extent.
 ## Track-level acceptance
 
 Numeric tolerances must be chosen with the annotation owner using examples in
-X-Points. The evaluator then defines one versioned predicate such as:
+X-Points. The evaluator defines a versioned diagnostic predicate such as:
 
 ```text
 canonical dimensions pass their per-axis tolerances
@@ -63,9 +69,14 @@ AND every evaluated frame passes hard worst-frame limits
 AND all invariant and finite-output checks pass
 ```
 
+This predicate can reject an obviously unsafe candidate, but passing it does
+not establish product success. Locked qualification additionally records one
+of `accept_as_is`, `needs_edit`, or `not_judgeable` for the complete track.
+
 Report:
 
-- strict track pass rate;
+- strict numeric track pass rate;
+- human `accept_as_is` rate for released, judgeable tracks;
 - count of improved, unchanged, and regressed tracks;
 - success precision among tracks for which the backend returned success;
 - insufficient-evidence rate;
@@ -78,24 +89,29 @@ that a reviewer must correct.
 
 ## Learned-backend promotion order
 
-The accepted learned implementation sequence is specified in
-[`learned-refinement-plan-v1.md`](learned-refinement-plan-v1.md). It adds no
-alternative definition of quality: this document's reviewed-gold metrics and
-human correction outcome remain authoritative.
+The current learned exploration sequence is specified in the
+[object-centric foundation plan](object-centric-foundation-exploration-v1.md).
+It adds no alternative definition of quality: this document's reviewed-gold
+diagnostics and literal human `accept_as_is` outcome remain authoritative.
 
-The learned backend is promoted in three separate decisions:
+The learned direction is promoted in separate decisions:
 
-1. a size-only development result must improve strict size pass rate and every
-   dimension's MAE/P95 over coarse-median and frozen geometric baselines;
-2. joint pose refinement must retain the accepted size result while improving
-   P95 and worst-frame pose metrics; and
-3. calibrated public success must have zero catastrophic successes and meet a
-   precision target frozen before the locked test.
+1. a shape representation must reconstruct held-out complete geometry and
+   improve amodal completion from partial evidence;
+2. canonical shape, metric scale, pose, and observation sampling must remain
+   separated under controlled and held-out transformations;
+3. the full trajectory model must improve strict size and worst-frame pose on
+   leave-one-dataset, observation, and detector holdouts; and
+4. a frozen release rule must achieve the predeclared successful-track
+   `accept_as_is` precision with zero catastrophic successes on the locked
+   operational set.
 
-A size-only prediction is a diagnostic sidecar, not `RefinementSuccess`.
-Failure at the size gate blocks pose-model work. Confidence thresholds are fit
-only on the calibration split, and all learned comparisons use identical case
-IDs, target revisions, point evidence, and tabbed per-instance review.
+Direct box regression is a negative-control baseline, not the target
+architecture. Shape completions, size-only predictions, and uncalibrated joint
+predictions are diagnostic sidecars, not `RefinementSuccess`. Confidence rules
+are fit only on public-domain calibration data, and all comparisons use
+identical case IDs, target revisions, point evidence, and tabbed per-instance
+review.
 
 ## Controlled pose-recovery validation
 
