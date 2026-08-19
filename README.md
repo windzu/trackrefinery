@@ -18,18 +18,20 @@ responsibilities.
 
 The framework is usable as an installable Python package. It contains the
 validated public contracts, source/target-isolated datasets, deterministic
-fixtures, quantitative evaluation, and visual review bundles. The first
-backend, `JointCuboidRefiner`, now implements versioned initial evidence-region
-selection, robust ground estimation, point-state traces, and trace-aware review
-bundles. It also performs deterministic per-frame upright registration and
-builds a cross-frame-supported provisional canonical point shape. It
-also alternates cross-frame evidence reassignment, registration, and
-visible-envelope cuboid fitting to produce a trace-only canonical size
-candidate. It deliberately returns `insufficient_evidence` until
-multi-hypothesis observability, stability checks, and the final quality gate
-are implemented.
-The full algorithm is specified in the
-[Geometric Refinement V1 design](docs/geometric-refinement-v1.md).
+fixtures, quantitative evaluation, and visual review bundles.
+
+The accepted algorithm direction is
+[Component-Consensus Geometric Refinement V2](docs/geometric-refinement-v2.md):
+extract one object component per usable frame, aggregate only reliable frames,
+fit one canonical size, and refine every frame pose with that size fixed. It
+does not use learned priors, sensor rays, free-space, or occupancy modeling.
+V2 is designed but not yet implemented.
+
+The existing `JointCuboidRefiner` implements the rejected
+[V1 experimental design](docs/geometric-refinement-v1.md). It is retained as a
+trace-only regression baseline and always returns `insufficient_evidence`;
+real-data review showed that its local registration residual could improve
+while the aggregate vehicle geometry became worse.
 
 ## Install and import
 
@@ -53,9 +55,9 @@ case = dataset.load_case("scene-001_vehicle-0042")
 result = my_refiner.refine(case)
 ```
 
-The in-progress deterministic backend can already be used to inspect current
-evidence, provisional poses, its persistent canonical shape, and the fitted
-cuboid candidate without producing a false refinement:
+The legacy V1 backend can be used to reproduce and inspect its evidence,
+provisional poses, persistent canonical shape, and fitted cuboid candidate
+without producing a false refinement:
 
 ```python
 from trackrefinery import JointCuboidRefiner, build_review_bundle

@@ -70,6 +70,20 @@ coarse-versus-refined-versus-gold comparison. The next benchmark preparation
 step is to freeze model candidates for the three annotated Clips and review
 matched target tracks independently in X-Points.
 
+### Rejected V1 baseline observation
+
+The same-point A/B bundle for the first real V1 candidate in
+`20260817_G150-002_000` contains 30,239 selected target points. V1 registration
+reduced per-frame centroid XY RMS from `0.654 m` to `0.411 m`, but changed the
+1--99% target envelope from `4.077 x 2.246 m` to `4.100 x 2.479 m` and increased
+its XY area from `9.158 m^2` to `10.164 m^2`.
+
+This is a recorded qualitative design failure, not an accuracy result: the Clip
+has no reviewed target. It demonstrates that V1's local registration metric can
+improve while the visible aggregate becomes wider and less vehicle-like. V2
+must reproduce this same-point case as a non-regression test and must reject a
+candidate with this behavior.
+
 ## Gold-target preparation
 
 Existing annotation is a candidate target, not automatically gold. Selected

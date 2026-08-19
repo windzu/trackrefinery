@@ -15,8 +15,9 @@ optimization rather than a change to the refinement contract.
 ```text
 upstream detector and tracker
   -> full frame clouds + one associated detection track + frame poses
-  -> TrackRefinery selects enlarged evidence regions
-  -> joint canonical geometry and per-frame pose refinement
+  -> TrackRefinery extracts one component per usable frame
+  -> reliable-frame aggregation and one canonical size
+  -> fixed-size per-frame pose refinement
   -> canonical size + refined poses + diagnostics
   -> caller decides whether and how to publish the result
 ```
@@ -64,22 +65,29 @@ with diagnostics; it must not silently return coarse boxes as refined output.
 
 ## Algorithm boundary
 
-The public framework remains backend-neutral, but the first supported backend
-is now selected: `JointCuboidRefiner` is a deterministic geometric optimizer
-with no learned weights or category-conditioned size priors. It jointly owns
-evidence assignment, canonical geometry, and per-frame pose refinement. The
-accepted algorithm and evidence-quality contract are specified in
-[Deterministic Geometric Refinement V1](geometric-refinement-v1.md).
+The public framework remains backend-neutral. The accepted first production
+direction is the deterministic, non-learned
+[Component-Consensus Geometric Refinement V2](geometric-refinement-v2.md). It
+extracts one object component per usable frame, prevents weak frames from
+defining canonical geometry, performs track-anchored aggregation, estimates
+one size, and then refines every frame pose while holding that size fixed.
 
-The implementation currently reaches deterministic evidence assignment,
-upright per-frame registration, persistent canonical point aggregation, and an
-alternating visible-envelope cuboid fit. These remain trace-only intermediate
-stages: multi-hypothesis selection and the release-quality observability and
-stability gates are still required before this backend may return success.
+The existing `JointCuboidRefiner` implementation is the rejected V1
+experimental baseline. It performs coarse-box evidence selection, synchronous
+cross-frame registration, canonical aggregation, and alternating envelope
+fitting, but deliberately returns `insufficient_evidence`. Real review showed
+that its local residual could improve while the aggregate geometry regressed.
+It remains available only to reproduce that failure and compare V2 against a
+frozen baseline; it is not an in-progress production backend.
+
+V2 keeps the public full-frame input and success/insufficient outcome. It does
+not use sensor-origin rays, free-space, occupancy, learned priors, or
+per-sensor processing. Optional portable metadata remains in the contract for
+other backends and diagnostics but is not consumed by V2.
 
 Future experimental backends may use a different implementation without
 changing the public full-frame input or validated success/insufficient outcome.
-They must be named explicitly and must not weaken the V1 success semantics.
+They must be named explicitly and must not weaken the public success semantics.
 
 ## Integration direction
 
