@@ -134,6 +134,15 @@ sidecar are implemented, but it still cannot publish `RefinementSuccess`;
 reviewed-target calibration and fixed-shape per-frame pose refinement remain
 gated work.
 
+The current production-path implementation is `ObservableCoreRefiner`. It
+reuses V2 component measurements, forms maximal adjacent geometry-frame runs,
+breaks runs at relative timestamp discontinuities, deterministically chooses
+one strongest run, and downgrades disconnected geometry frames to pose
+candidates before aggregation. Its trace stages are
+`observable_core_selection_v1` and `observable_core_aggregation_v1`. It cannot
+publish a full or partial success until canonical-size stability and fixed-size
+pose gates are implemented.
+
 Future experimental backends may use a different implementation without
 changing the public full-frame input or validated full/partial/insufficient outcome.
 They must be named explicitly and must not weaken the public success semantics.

@@ -53,6 +53,13 @@ model/category size fallback. These experiments still do not publish
 `RefinementSuccess`; reviewed-target calibration and fixed-shape per-frame pose
 refinement remain required.
 
+`ObservableCoreRefiner` is now the current deterministic MVP entry point. It
+reuses the component evidence, selects one strongest temporally connected run,
+downgrades disconnected geometry frames to later pose candidates, and
+aggregates only the selected core. Its result remains
+`insufficient_evidence` until canonical-size perturbation gates and fixed-size
+pose refinement are complete.
+
 The current default is a dense-first MVP profile. Only same-track frames with
 at least 1,000 selected component points and strong relative spatial support
 may define geometry, and a track needs five such frames. Sparse tracks remain
@@ -122,6 +129,16 @@ for frame in run.trace.frames:
         frame.component.frame_role,
         frame.registration,
     )
+```
+
+The current observable-core path is independently inspectable in the same way:
+
+```python
+from trackrefinery import ObservableCoreRefiner
+
+run = ObservableCoreRefiner().refine_with_trace(case)
+core = run.outcome.diagnostics["observable_core"]
+print(core["status"], core["core_frame_ids"])
 ```
 
 Stage 3 correction capability can be tested without pretending that an
