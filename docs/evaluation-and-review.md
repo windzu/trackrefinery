@@ -3,8 +3,8 @@
 Status: framework, explicit partial-frame authority, legacy V1 previews, V2
 component/frame-role plus anchored alignment previews, controlled Stage 3
 recovery, and experimental Stage 4 canonical-size diagnostics implemented;
-observable-core reviewed-target calibration and fixed-size pose diagnostics
-remain
+observable-core qualification/connected-core diagnostics implemented;
+reviewed-target size calibration and fixed-size pose diagnostics remain
 
 ## What “good” means
 
@@ -315,6 +315,12 @@ During the dense-first MVP, algorithm cards also state whether the instance
 passes the current dense-track gate. Dense-supported cards sort before
 out-of-scope sparse cards inside each Clip, but the catalog continues to show
 every instance; scope filtering must not hide failures or sparse evidence.
+
+Observable-core bundles additionally record the selected core frame IDs,
+disconnected geometry frames, every candidate run, the median timestamp
+interval, and the resulting maximum connected gap. Cards and detail pages show
+the selected-core count. This is a qualification diagnostic, not a released
+size or pose result.
 
 Controlled recovery has its own tabbed suite. Each top-level tab is one real
 source case, and the profile cards show reference/input/output comparison

@@ -72,6 +72,8 @@ COMPONENT_TRACE_STAGES = frozenset(
         "anchored_component_aggregation_v2",
         "pose_graph_aggregation_v3_experiment",
         "observable_canonical_cuboid_v4_experiment",
+        "observable_core_selection_v1",
+        "observable_core_aggregation_v1",
     }
 )
 ALIGNED_COMPONENT_STAGES = frozenset(
@@ -79,6 +81,7 @@ ALIGNED_COMPONENT_STAGES = frozenset(
         "anchored_component_aggregation_v2",
         "pose_graph_aggregation_v3_experiment",
         "observable_canonical_cuboid_v4_experiment",
+        "observable_core_aggregation_v1",
     }
 )
 
@@ -124,6 +127,8 @@ def _evidence_presentation(
             "observable_canonical_cuboid_v4_experiment": (
                 "V4 observable canonical cuboid evidence"
             ),
+            "observable_core_selection_v1": "Observable-core selection",
+            "observable_core_aggregation_v1": "Observable-core aggregation",
         }[trace.stage]
         return title, COMPONENT_EVIDENCE_LABELS
     return "Current evidence classification", LEGACY_EVIDENCE_LABELS
@@ -137,6 +142,16 @@ def _canonical_cuboid_diagnostics(
         return None
     canonical_cuboid = diagnostics.get("canonical_cuboid")
     return canonical_cuboid if isinstance(canonical_cuboid, Mapping) else None
+
+
+def _observable_core_diagnostics(
+    outcome_payload: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    diagnostics = outcome_payload.get("diagnostics")
+    if not isinstance(diagnostics, Mapping):
+        return None
+    observable_core = diagnostics.get("observable_core")
+    return observable_core if isinstance(observable_core, Mapping) else None
 
 
 def _frame_role_counts(
@@ -437,6 +452,7 @@ def build_review_bundle(
             frame_support_count=canonical_shape.frame_support_count,
         )
     outcome_payload = outcome_to_dict(case.case_id, outcome)
+    observable_core = _observable_core_diagnostics(outcome_payload)
     (output / "result.json").write_text(
         json.dumps(outcome_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -499,6 +515,13 @@ def build_review_bundle(
             None if cuboid_fit is None else cuboid_fit.canonical_size_lwh
         ),
         "canonical_cuboid_experiment": _canonical_cuboid_diagnostics(outcome_payload),
+        "observable_core": observable_core,
+        "observable_core_status": (
+            None if observable_core is None else observable_core.get("status")
+        ),
+        "observable_core_frame_ids": (
+            [] if observable_core is None else observable_core.get("core_frame_ids", [])
+        ),
         "evidence_trace_path": "evidence_trace.json" if trace is not None else None,
         "evidence_masks_path": "evidence_masks.npz" if trace is not None else None,
         "canonical_shape_path": (
@@ -683,6 +706,10 @@ def _review_bundle_index_row(
         alignment_label = "V3 observable pose-graph aggregate"
     elif algorithm_stage == "observable_canonical_cuboid_v4_experiment":
         alignment_label = "V4 observable canonical cuboid"
+    elif algorithm_stage == "observable_core_selection_v1":
+        alignment_label = "Observable-core selection · input-track alignment"
+    elif algorithm_stage == "observable_core_aggregation_v1":
+        alignment_label = "Observable-core anchored aggregation"
     elif review_mode == "algorithm_candidate":
         alignment_label = "Algorithm registration"
     elif review_mode == "source_annotation_reference":
@@ -718,6 +745,9 @@ def _review_bundle_index_row(
         "input_median_size_lwh": manifest.get("input_median_size_lwh"),
         "cuboid_candidate_size_lwh": manifest.get("cuboid_candidate_size_lwh"),
         "canonical_cuboid_experiment": manifest.get("canonical_cuboid_experiment"),
+        "observable_core": manifest.get("observable_core"),
+        "observable_core_status": manifest.get("observable_core_status"),
+        "observable_core_frame_ids": manifest.get("observable_core_frame_ids", []),
         "preview_path": (relative / "preview.html").as_posix(),
         "aggregate_top_path": display_top.relative_to(output).as_posix(),
         "aggregate_top_label": f"{alignment_label} · TOP aggregate",
@@ -1080,6 +1110,21 @@ def _clip_instance_card(instance: object) -> str:
             )
             + "</p>"
         )
+    observable_core = instance.get("observable_core")
+    observable_core_detail = ""
+    if isinstance(observable_core, Mapping):
+        core_ids = observable_core.get("core_frame_ids")
+        rejected_ids = observable_core.get("rejected_geometry_frame_ids")
+        core_count = len(core_ids) if isinstance(core_ids, (list, tuple)) else 0
+        rejected_count = (
+            len(rejected_ids) if isinstance(rejected_ids, (list, tuple)) else 0
+        )
+        observable_core_detail = (
+            "<p><strong>Observable core:</strong> "
+            + html_module.escape(str(observable_core.get("status") or "unknown"))
+            + f" · {core_count}/{frame_count} core frames"
+            + f" · {rejected_count} disconnected geometry frames excluded</p>"
+        )
     preview = html_module.escape(str(instance["preview_path"]), quote=True)
     top = html_module.escape(str(instance["aggregate_top_path"]), quote=True)
     side = html_module.escape(str(instance["aggregate_side_path"]), quote=True)
@@ -1170,6 +1215,7 @@ def _clip_instance_card(instance: object) -> str:
         f"{selected_component_point_count} "
         "selected component points</p>"
         f"<p>{html_module.escape(size_label)}</p>"
+        f"{observable_core_detail}"
         f"{canonical_detail}</article>"
     )
 
@@ -2381,9 +2427,9 @@ def _write_html(
         if trace is not None
         else "No algorithm evidence trace for this case."
     )
-    canonical_cuboid = _canonical_cuboid_diagnostics(
-        outcome_to_dict(case.case_id, outcome)
-    )
+    result_payload = outcome_to_dict(case.case_id, outcome)
+    canonical_cuboid = _canonical_cuboid_diagnostics(result_payload)
+    observable_core = _observable_core_diagnostics(result_payload)
     canonical_decision_display = "not run"
     if canonical_cuboid is not None:
         reason_codes = canonical_cuboid.get("reason_codes")
@@ -2394,6 +2440,19 @@ def _write_html(
         )
         canonical_decision_display = (
             f"{canonical_cuboid.get('status', 'unknown')} · {reason_text}"
+        )
+    observable_core_display = "not run"
+    if observable_core is not None:
+        core_ids = observable_core.get("core_frame_ids")
+        rejected_ids = observable_core.get("rejected_geometry_frame_ids")
+        core_count = len(core_ids) if isinstance(core_ids, (list, tuple)) else 0
+        rejected_count = (
+            len(rejected_ids) if isinstance(rejected_ids, (list, tuple)) else 0
+        )
+        observable_core_display = (
+            f"{observable_core.get('status', 'unknown')} · "
+            f"{core_count}/{len(case.frames)} core frames · "
+            f"{rejected_count} disconnected geometry frames excluded"
         )
     case_display = html_module.escape(case.case_id)
     track_display = html_module.escape(case.track.track_id)
@@ -2512,6 +2571,8 @@ def _write_html(
   <p><strong>Review mode:</strong> {review_mode_display}</p>
   <p><strong>Algorithm stage:</strong> {algorithm_stage_display}</p>
   <p><strong>Frame roles:</strong> {role_counts_display}</p>
+  <p><strong>Observable core:</strong>
+    {html_module.escape(observable_core_display)}</p>
   <p><strong>Trace-only cuboid candidate:</strong> {candidate_display}</p>
   <p><strong>Stage 4 cuboid decision:</strong>
     {html_module.escape(canonical_decision_display)}</p>

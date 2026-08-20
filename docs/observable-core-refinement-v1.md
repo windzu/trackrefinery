@@ -1,6 +1,8 @@
 # Observable-Core Refinement V1
 
-Status: accepted deterministic MVP scope and public authority contract
+Status: accepted deterministic MVP scope and public authority contract;
+per-frame qualification and connected-core selection implemented; canonical
+size and fixed-size pose release gates remain
 
 ## Decision
 
@@ -61,6 +63,26 @@ Find the strongest temporally connected run of qualified frames. Isolated good
 frames do not bridge a weak interval. The core must meet minimum frame count,
 total support, view diversity, and motion/pose consistency. If no component
 passes, return `insufficient_evidence`.
+
+The implemented V1 selector uses the existing component-consensus measurements
+without adding category, vehicle, sensor, or frame-rate priors:
+
+- a geometry frame must already pass point count, voxel count, robust spread,
+  component dominance, cross-resolution stability, ground support, and
+  track-relative support checks;
+- candidate cores are maximal runs of adjacent geometry frames;
+- a timestamp interval larger than `maximum_timestamp_gap_factor` times the
+  track's median interval also breaks a run;
+- runs below `minimum_core_frames` cannot define geometry; and
+- the selected run is chosen deterministically by frame count, total points,
+  total voxels, minimum resolution stability, minimum dominance, then earliest
+  start index.
+
+Geometry-quality frames outside the selected run become `pose_candidate` with
+the reason `outside_selected_observable_core`. They may be reconsidered only
+after canonical geometry is fixed. They do not enter the current aggregate.
+The selector reports every run and every per-frame disposition in the result
+diagnostics and review manifest.
 
 ### 3. Joint canonical aggregation
 
@@ -125,17 +147,20 @@ turn a plausible completion into a geometric fact. A future learned backend
 uses the same frame-authority contract and must separately qualify any frame or
 dimension it releases.
 
-## Next implementation milestone
+## Current implementation and next milestone
 
-The next backend milestone is not another whole-track heuristic. It is a
-traceable `ObservableCoreRefiner` that:
+`ObservableCoreRefiner` now:
 
 1. emits deterministic per-frame qualification diagnostics;
 2. selects one connected core;
-3. produces a stable canonical-size candidate with perturbation reports;
-4. refines and classifies core/pose-only frames; and
-5. returns `PartialRefinementSuccess` only after configured acceptance gates
-   pass.
+3. passes only that core into the existing anchored aggregation stage; and
+4. remains stage-gated as `insufficient_evidence`.
+
+The next milestone is to replace the provisional aggregate-to-cuboid step with
+a canonical-size candidate plus leave-one-frame-out, coherent temporal-subset,
+density/resolution, localization, and boundary-cluster perturbation reports.
+Only after that size gate passes will fixed-size per-frame pose refinement and
+`PartialRefinementSuccess` be enabled.
 
 Until those gates are calibrated, experimental traces remain visible but the
 backend returns `insufficient_evidence`.

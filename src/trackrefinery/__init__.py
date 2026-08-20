@@ -91,6 +91,17 @@ from trackrefinery.geometric import (
     validate_geometric_trace,
     write_geometric_trace,
 )
+from trackrefinery.observable_core import (
+    OBSERVABLE_CORE_ALGORITHM_VERSION,
+    OBSERVABLE_CORE_CONFIG_SCHEMA_VERSION,
+    ObservableCoreRefiner,
+    ObservableCoreRunTrace,
+    ObservableCoreSelection,
+    ObservableCoreSettings,
+    ObservableFrameDisposition,
+    ObservableFrameQualification,
+    select_observable_core,
+)
 from trackrefinery.refiner import TrackRefiner, validate_outcome
 from trackrefinery.review import (
     build_clip_review_suite,
@@ -112,6 +123,8 @@ __all__ = [
     "EVIDENCE_TRACE_CONTRACT",
     "GEOMETRIC_ALGORITHM_VERSION",
     "GEOMETRIC_CONFIG_SCHEMA_VERSION",
+    "OBSERVABLE_CORE_ALGORITHM_VERSION",
+    "OBSERVABLE_CORE_CONFIG_SCHEMA_VERSION",
     "POSE_GRAPH_EXPERIMENT_CONTRACT",
     "POSE_GRAPH_VARIANTS",
     "AcceptanceThresholds",
@@ -151,6 +164,12 @@ __all__ = [
     "InstanceTrack",
     "InsufficientEvidence",
     "JointCuboidRefiner",
+    "ObservableCoreRefiner",
+    "ObservableCoreRunTrace",
+    "ObservableCoreSelection",
+    "ObservableCoreSettings",
+    "ObservableFrameDisposition",
+    "ObservableFrameQualification",
     "ObservationKind",
     "PartialRefinementSuccess",
     "Pose3D",
@@ -187,6 +206,7 @@ __all__ = [
     "run_controlled_recovery",
     "select_initial_evidence",
     "select_object_components",
+    "select_observable_core",
     "validate_geometric_trace",
     "validate_outcome",
     "write_geometric_trace",

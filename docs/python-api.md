@@ -123,6 +123,41 @@ inseparable component`, `other ROI points`, and `removed ground` labels. Dense
 supported tracks also receive a same-selected-point BEFORE/AFTER view of the
 input-track alignment and provisional anchored alignment.
 
+## Inspect observable-core selection
+
+`ObservableCoreRefiner` is the current deterministic MVP path. It selects one
+connected core before aggregation and exposes every run and frame disposition.
+It remains stage-gated until canonical-size stability and fixed-size pose
+refinement are implemented:
+
+```python
+from trackrefinery import ObservableCoreRefiner
+
+run = ObservableCoreRefiner().refine_with_trace(case)
+assert run.outcome.status == "insufficient_evidence"
+core = run.outcome.diagnostics["observable_core"]
+print(core["status"], core["core_frame_ids"])
+for frame in core["frames"]:
+    print(frame["frame_id"], frame["disposition"], frame["reason_codes"])
+```
+
+Custom development thresholds are supplied as immutable, content-addressed
+settings. They are backend configuration, not caller crop policy:
+
+```python
+from trackrefinery import (
+    ComponentConsensusSettings,
+    ObservableCoreRefiner,
+    ObservableCoreSettings,
+)
+
+settings = ObservableCoreSettings(
+    component=ComponentConsensusSettings(track_minimum_geometry_frames=5),
+    maximum_timestamp_gap_factor=2.5,
+)
+run = ObservableCoreRefiner(settings).refine_with_trace(case)
+```
+
 ## Validate known-error Stage 3 recovery
 
 `run_controlled_recovery()` is an evaluator-side diagnostic. It reuses frozen
