@@ -25,8 +25,29 @@ class MyRefiner(TrackRefiner):
 ```
 
 `TrackRefiner.refine()` calls `_refine()` and then enforces that the result
-belongs to the input track. A successful backend must return exactly one pose
-for every input observation in the same order.
+belongs to the input track. `RefinementSuccess` returns exactly one pose for
+every input observation in the same order. `PartialRefinementSuccess` returns
+authoritative poses for a supported subset and explicitly accounts for every
+other input frame with `UnsupportedFrame`; the two ordered lists must partition
+the input.
+
+```python
+from trackrefinery import (
+    PartialRefinementSuccess,
+    RefinedFramePose,
+    RefinedFrameRole,
+    UnsupportedFrame,
+)
+
+return PartialRefinementSuccess(
+    track_id=case.track.track_id,
+    canonical_size_lwh=(4.72, 1.86, 1.61),
+    frame_poses=(RefinedFramePose("frame-004", pose, RefinedFrameRole.GEOMETRY),),
+    unsupported_frames=(UnsupportedFrame("frame-003", ("sparse_track_tail",)),),
+)
+```
+
+The example is schematic: a real result must account for every input frame.
 
 ## Inspect the legacy V1 backend
 

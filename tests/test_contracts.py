@@ -8,12 +8,15 @@ from trackrefinery import (
     FrameCloud,
     InstanceTrack,
     InsufficientEvidence,
+    PartialRefinementSuccess,
     Pose3D,
     RefinedFramePose,
+    RefinedFrameRole,
     RefinementCase,
     RefinementSuccess,
     TrackObservation,
     TrackRefiner,
+    UnsupportedFrame,
 )
 
 
@@ -78,6 +81,49 @@ def test_success_must_cover_every_input_frame() -> None:
 
     with pytest.raises(ValueError, match="every input frame"):
         MissingFrame().refine(_case())
+
+
+def test_partial_success_partitions_authoritative_and_unsupported_frames() -> None:
+    class CoreOnly(TrackRefiner):
+        def _refine(self, case: RefinementCase) -> PartialRefinementSuccess:
+            return PartialRefinementSuccess(
+                track_id=case.track.track_id,
+                canonical_size_lwh=(4.0, 2.0, 1.5),
+                frame_poses=(
+                    RefinedFramePose(
+                        "0",
+                        case.track.observations[0].coarse_box.pose,
+                        RefinedFrameRole.POSE_ONLY,
+                    ),
+                ),
+                unsupported_frames=(
+                    UnsupportedFrame("1", ("insufficient_object_points",)),
+                ),
+            )
+
+    result = CoreOnly().refine(_case())
+
+    assert result.status == "partial_success"
+    assert result.frame_poses[0].role is RefinedFrameRole.POSE_ONLY
+    assert result.unsupported_frames[0].frame_id == "1"
+
+
+def test_partial_success_must_account_for_every_input_frame() -> None:
+    class MissingDisposition(TrackRefiner):
+        def _refine(self, case: RefinementCase) -> PartialRefinementSuccess:
+            return PartialRefinementSuccess(
+                track_id=case.track.track_id,
+                canonical_size_lwh=(4.0, 2.0, 1.5),
+                frame_poses=(
+                    RefinedFramePose("0", case.track.observations[0].coarse_box.pose),
+                ),
+                unsupported_frames=(
+                    UnsupportedFrame("outside-input", ("not_supported",)),
+                ),
+            )
+
+    with pytest.raises(ValueError, match="partition every input frame"):
+        MissingDisposition().refine(_case())
 
 
 def test_insufficient_evidence_is_a_first_class_outcome() -> None:

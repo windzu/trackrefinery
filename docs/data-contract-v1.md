@@ -7,7 +7,8 @@ Status: implemented framework contract; geometric backend not yet release-comple
 One refinement request identifies exactly one already-associated rigid object:
 
 ```text
-refine(frame_clouds, instance_track) -> success | insufficient_evidence
+refine(frame_clouds, instance_track)
+  -> success | partial_success | insufficient_evidence
 ```
 
 `frame_clouds` may be reused without copying across multiple calls. The library
@@ -69,16 +70,28 @@ The coarse boxes are initialization and localization evidence, not targets.
 TrackRefinery decides how large an evidence region to inspect and which points
 support the object.
 
-## Successful result
+## Full and partial successful results
 
-A successful rigid-object result contains:
+A full or partial successful rigid-object result contains:
 
 - exactly one finite, positive `canonical_size_lwh`;
-- one refined pose for every refined input observation, expressed in the same
-  annotation frame as that observation;
+- one or more authoritative refined poses, expressed in the same annotation
+  frame as each observation;
+- a `geometry` or `pose_only` role for every authoritative pose;
 - byte-equivalent canonical dimensions for every materialized output box;
 - numerical diagnostics and evidence summaries sufficient to inspect why the
   fit succeeded.
+
+`success` means every input frame has an authoritative refined pose in input
+order. `partial_success` means the result has authority over only a supported
+subset. It also contains every remaining input frame as `unsupported`, in
+input order, with stable reason codes. The refined and unsupported lists are
+disjoint and exactly partition the input track.
+
+An unsupported frame has no TrackRefinery output pose. A downstream adapter
+may retain the caller's coarse pose for continuity or review, but it must not
+serialize that pose as a refined result. See the accepted
+[observable-core refinement](observable-core-refinement-v1.md) scope.
 
 The core result does not contain an X-4D annotation, release decision, instance
 token, or model-service protocol object. Adapters construct those downstream.

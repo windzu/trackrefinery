@@ -258,9 +258,10 @@ Convergence alone is not success. A candidate must prove all of the following:
 - the result changes the coarse initialization only where direct evidence
   supports that change.
 
-The result contract requires a refined pose for every input observation.
-Therefore one unobservable required frame makes the whole V1 result
-`insufficient_evidence`; V1 does not publish a partially successful track.
+V1 retains its original all-frame publication rule even though the current
+public contract now supports explicit partial authority. Therefore one
+unobservable required frame makes the whole V1 result `insufficient_evidence`;
+this frozen historical backend does not publish a partially successful track.
 
 Initial stable reason-code families are:
 

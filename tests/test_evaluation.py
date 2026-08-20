@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
 
-from trackrefinery import InsufficientEvidence, RefinedFramePose, RefinementSuccess
+from trackrefinery import (
+    InsufficientEvidence,
+    PartialRefinementSuccess,
+    RefinedFramePose,
+    RefinedFrameRole,
+    RefinementSuccess,
+    UnsupportedFrame,
+)
 from trackrefinery.dataset import InferenceDataset
 from trackrefinery.evaluation import AcceptanceThresholds, evaluate_case, evaluate_suite
 from trackrefinery.serde import read_outcome, write_outcome
@@ -81,6 +89,54 @@ def test_result_json_round_trip(tmp_path: Path) -> None:
     assert case_id == target.case_id
     assert isinstance(restored, RefinementSuccess)
     assert np.allclose(restored.canonical_size_lwh, target.canonical_size_lwh)
+
+    legacy_payload = json.loads(path.read_text(encoding="utf-8"))
+    legacy_payload["contract_version"] = "trackrefinery-refinement-result-v1"
+    for row in legacy_payload["frame_poses"]:
+        row.pop("role")
+    path.write_text(json.dumps(legacy_payload), encoding="utf-8")
+    _, legacy_restored = read_outcome(path)
+    assert isinstance(legacy_restored, RefinementSuccess)
+    assert all(
+        item.role is RefinedFrameRole.GEOMETRY for item in legacy_restored.frame_poses
+    )
+
+
+def test_partial_result_round_trip_and_evaluation_use_authoritative_subset(
+    tmp_path: Path,
+) -> None:
+    generated = generate_dataset(tmp_path / "synthetic")
+    case = InferenceDataset.open(generated.inference_root).load_case("moving_complete")
+    target = TargetDataset.open(generated.target_root).load_target(case.case_id)
+    supported = target.frame_poses[1:-1]
+    unsupported_ids = (target.frame_poses[0].frame_id, target.frame_poses[-1].frame_id)
+    outcome = PartialRefinementSuccess(
+        track_id=target.track_id,
+        canonical_size_lwh=target.canonical_size_lwh,
+        frame_poses=tuple(
+            RefinedFramePose(item.frame_id, item.pose, RefinedFrameRole.GEOMETRY)
+            for item in supported
+        ),
+        unsupported_frames=tuple(
+            UnsupportedFrame(frame_id, ("sparse_track_tail",))
+            for frame_id in unsupported_ids
+        ),
+    )
+    path = tmp_path / "partial-result.json"
+
+    write_outcome(path, case.case_id, outcome)
+    _, restored = read_outcome(path)
+    report = evaluate_case(case, restored, target, _thresholds())
+
+    assert isinstance(restored, PartialRefinementSuccess)
+    assert report.outcome_status == "partial_success"
+    assert report.authoritative_frame_ids == tuple(item.frame_id for item in supported)
+    assert report.unsupported_frame_ids == unsupported_ids
+    assert report.refined is not None
+    assert tuple(item.frame_id for item in report.refined.frames) == (
+        report.authoritative_frame_ids
+    )
+    assert report.strict_pass is True
 
 
 def test_suite_report_counts_success_and_explicit_insufficiency(tmp_path: Path) -> None:

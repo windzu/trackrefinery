@@ -5,7 +5,7 @@ It consumes full per-frame point clouds, one already-associated detection
 track, and exact frame poses, then estimates:
 
 - one stable, canonical size for each rigid object instance;
-- a refined pose for every observed frame;
+- authoritative refined poses for the supported observed frames;
 - diagnostics stating whether the available evidence supports the result.
 
 The caller does not choose how far to enlarge and crop each detection. Evidence
@@ -20,12 +20,18 @@ The framework is usable as an installable Python package. It contains the
 validated public contracts, source/target-isolated datasets, deterministic
 fixtures, quantitative evaluation, and visual review bundles.
 
-Real-data review has moved the current research direction to an
-[object-centric foundation exploration](docs/object-centric-foundation-exploration-v1.md).
-It first tests whether a model can learn a complete canonical shape while
-separating metric scale, per-frame pose, and sensor/visibility sampling. Direct
-trajectory box regression is retained only as a negative-control baseline.
-No learned backend is release-qualified yet.
+Real-data review has accepted a deterministic
+[observable-core MVP](docs/observable-core-refinement-v1.md). It estimates one
+canonical size from a connected reliable subset, refines only poses that pass
+fixed-geometry gates, and explicitly marks sparse or contradictory frames as
+unsupported. `success` retains all-frame authority; `partial_success` exposes
+the narrower supported-frame authority without copying coarse tails into the
+result.
+
+The [object-centric foundation exploration](docs/object-centric-foundation-exploration-v1.md)
+is deferred to future coverage expansion for incomplete or unobservable cases.
+Direct trajectory box regression remains only a negative-control baseline. No
+learned backend is release-qualified yet.
 
 [Component-Consensus Geometric Refinement V2](docs/geometric-refinement-v2.md)
 is retained as a frozen comparison and diagnostic direction. It does not act

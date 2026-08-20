@@ -1,21 +1,25 @@
 # Object-Centric Foundation Refinement Exploration V1
 
-Status: proposed exploration plan; supersedes the direct box-regression
-implementation direction in `learned-refinement-plan-v1.md`; no learned model
-is release-qualified
+Status: deferred coverage-expansion exploration; not on the deterministic
+observable-core MVP critical path; no learned model is release-qualified
 
 ## Decision
 
 TrackRefinery will explore an object-centric, amodal 3D representation rather
-than a detector-specific box correction network. The public unit and result do
-not change:
+than a detector-specific box correction network. The public unit and
+frame-authority result do not change:
 
 ```text
 full per-frame clouds + one associated coarse track + exact frame poses
     -> one canonical metric length/width/height
-    -> one refined pose for every input observation
-    -> success with diagnostics, or explicit insufficient evidence
+    -> authoritative refined poses for supported observations
+    -> full success, partial success, or explicit insufficient evidence
 ```
+
+This exploration begins only after the accepted
+[observable-core MVP](observable-core-refinement-v1.md) is qualified. Its role
+is to increase coverage where direct repeated geometry is incomplete, not to
+replace deterministic evidence with plausible completion.
 
 The research model must explain the complete track through four separated
 factors:

@@ -5,8 +5,8 @@
 TrackRefinery refines one already-associated rigid-object track. Its input is
 the sequence of full scene point clouds containing that object, the object's
 coarse detection in each input frame, and exact frame poses. Its output is one
-canonical `(length, width, height)` plus a refined object pose for every input
-observation.
+canonical `(length, width, height)` plus authoritative refined object poses for
+the supported input observations.
 
 The public algorithm unit is one instance track. A batch runner may share the
 same immutable frame-cloud objects across many tracks, but that is an execution
@@ -16,9 +16,9 @@ optimization rather than a change to the refinement contract.
 upstream detector and tracker
   -> full frame clouds + one associated detection track + frame poses
   -> TrackRefinery extracts one component per usable frame
-  -> reliable-frame aggregation and one canonical size
-  -> fixed-size per-frame pose refinement
-  -> canonical size + refined poses + diagnostics
+  -> observable-core aggregation and one canonical size
+  -> fixed-size pose refinement on supported frames
+  -> canonical size + authoritative poses + unsupported-frame reasons
   -> caller decides whether and how to publish the result
 ```
 
@@ -48,11 +48,14 @@ sensor fusion, calibration, and Clip candidate construction are outside the
 library. X-4D/MMDetection3D integration is an adapter. Automatic release is a
 caller policy, not a TrackRefinery decision.
 
-Each successful rigid-instance result has one canonical size shared exactly by
-all refined frame poses. A future articulated-object extension must be explicit
-rather than weakening this invariant. If the evidence cannot support the
-required accuracy, the operation returns a typed insufficient-evidence outcome
-with diagnostics; it must not silently return coarse boxes as refined output.
+Each full or partial successful rigid-instance result has one canonical size
+shared exactly by all authoritative refined frame poses. A full success covers
+every input frame. A partial success exactly partitions the input into
+authoritative and unsupported frames; coarse poses may remain a caller-side
+display fallback but are never TrackRefinery output. A future articulated-object
+extension must be explicit rather than weakening this invariant. If the
+evidence cannot support any useful core at the required accuracy, the operation
+returns a typed insufficient-evidence outcome with diagnostics.
 
 ## Extension points
 
@@ -65,16 +68,20 @@ with diagnostics; it must not silently return coarse boxes as refined output.
 
 ## Algorithm boundary
 
-The public framework remains backend-neutral. Real review showed that explicit
-point-boundary fitting remains too sensitive to incomplete faces and sparse
-clutter for the required no-correction geometry standard. The current next
-research direction is therefore the representation-first
-[object-centric foundation exploration](object-centric-foundation-exploration-v1.md).
-It tests whether a model can separate complete canonical shape, metric scale,
-per-frame pose, and nuisance observation sampling before it is allowed to act
-as a refinement backend. Direct trajectory `delta_log_lwh` regression from the
-superseded [learned V1 plan](learned-refinement-plan-v1.md) remains only a
-negative-control baseline.
+The public framework remains backend-neutral. Real review showed that claiming
+whole-track corrections mixes strong central evidence with sparse, weak tails.
+The accepted MVP is therefore the deterministic
+[Observable-Core Refinement V1](observable-core-refinement-v1.md): estimate a
+canonical size from a connected reliable subset, refine only supported poses,
+and make every unsupported frame explicit. Direct trajectory
+`delta_log_lwh` regression from the superseded
+[learned V1 plan](learned-refinement-plan-v1.md) remains only a negative-control
+baseline.
+
+The representation-first
+[object-centric foundation exploration](object-centric-foundation-exploration-v1.md)
+is deferred to coverage expansion for incomplete or unobservable cases. It is
+not on the deterministic MVP critical path.
 
 [Component-Consensus Geometric Refinement V2](geometric-refinement-v2.md) and
 its V3/V4 experiments remain frozen comparison and diagnostic backends. They
@@ -88,7 +95,8 @@ that its local residual could improve while the aggregate geometry regressed.
 It remains available only to reproduce that failure and compare V2 against a
 frozen baseline; it is not an in-progress production backend.
 
-V2 keeps the public full-frame input and success/insufficient outcome. It does
+V2 keeps the public full-frame input and validated full/partial/insufficient
+outcome. It does
 not use sensor-origin rays, free-space, occupancy, learned priors, or
 per-sensor processing. Optional portable metadata remains in the contract for
 other backends and diagnostics but is not consumed by V2.
@@ -127,7 +135,7 @@ reviewed-target calibration and fixed-shape per-frame pose refinement remain
 gated work.
 
 Future experimental backends may use a different implementation without
-changing the public full-frame input or validated success/insufficient outcome.
+changing the public full-frame input or validated full/partial/insufficient outcome.
 They must be named explicitly and must not weaken the public success semantics.
 
 ## Integration direction

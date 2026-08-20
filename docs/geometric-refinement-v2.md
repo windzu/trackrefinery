@@ -1,7 +1,8 @@
 # Component-Consensus Geometric Refinement V2
 
-Status: accepted replacement design; component extraction, frame roles, and
-provisional anchored geometry-frame aggregation implemented
+Status: frozen deterministic building block for the accepted observable-core
+MVP; component extraction, frame roles, and provisional anchored geometry-frame
+aggregation implemented
 
 ## Decision
 
@@ -14,7 +15,7 @@ full frame clouds + one associated coarse track + exact frame poses
   -> extract one object component in each usable frame
   -> align only reliable components into a sharp aggregate
   -> fit one canonical size from reliable aggregate evidence
-  -> keep that size fixed while refining every frame pose
+  -> keep that size fixed while refining each supported frame pose
   -> accept only a demonstrable same-instance improvement
 ```
 
@@ -29,13 +30,19 @@ more thresholds to its unanchored all-frame ICP loop.
 
 ## Output invariant and success meaning
 
-The public contract does not change:
+The current public contract requires:
 
 - exactly one canonical `(length, width, height)` for the rigid instance;
-- one refined pose for every input observation;
+- authoritative refined poses for every supported input observation;
+- explicit unsupported-frame reasons for every omitted input observation;
 - the exact same canonical dimensions materialized in every output frame;
-- an explicit `insufficient_evidence` result when the claimed accuracy is not
-  supported.
+- a full success, partial success, or explicit `insufficient_evidence` result
+  according to the claimed frame authority.
+
+The [observable-core contract](observable-core-refinement-v1.md) supersedes
+V2's original all-frame publication assumption. V2 component and aggregation
+stages may be reused, but their provisional roles are not public authority
+until the final fixed-size gates pass.
 
 For this project, `success` means that the result is suitable for direct
 preannotation review: a reviewer should not need to correct its size or any

@@ -10,13 +10,17 @@ from typing import Any
 from trackrefinery.contracts import (
     Box3D,
     InsufficientEvidence,
+    PartialRefinementSuccess,
     Pose3D,
     RefinedFramePose,
+    RefinedFrameRole,
     RefinementOutcome,
     RefinementSuccess,
+    UnsupportedFrame,
 )
 
-RESULT_CONTRACT = "trackrefinery-refinement-result-v1"
+RESULT_CONTRACT = "trackrefinery-refinement-result-v2"
+LEGACY_RESULT_CONTRACT = "trackrefinery-refinement-result-v1"
 
 
 def pose_to_dict(pose: Pose3D) -> dict[str, object]:
@@ -65,12 +69,21 @@ def outcome_to_dict(case_id: str, outcome: RefinementOutcome) -> dict[str, objec
         "status": outcome.status,
         "diagnostics": thaw_json(outcome.diagnostics),
     }
-    if isinstance(outcome, RefinementSuccess):
+    if isinstance(outcome, (RefinementSuccess, PartialRefinementSuccess)):
         payload["canonical_size_lwh"] = list(outcome.canonical_size_lwh)
         payload["frame_poses"] = [
-            {"frame_id": item.frame_id, "pose": pose_to_dict(item.pose)}
+            {
+                "frame_id": item.frame_id,
+                "pose": pose_to_dict(item.pose),
+                "role": item.role.value,
+            }
             for item in outcome.frame_poses
         ]
+        if isinstance(outcome, PartialRefinementSuccess):
+            payload["unsupported_frames"] = [
+                {"frame_id": item.frame_id, "reasons": list(item.reasons)}
+                for item in outcome.unsupported_frames
+            ]
     else:
         payload["reasons"] = list(outcome.reasons)
     return payload
@@ -78,8 +91,12 @@ def outcome_to_dict(case_id: str, outcome: RefinementOutcome) -> dict[str, objec
 
 def outcome_from_dict(value: object) -> tuple[str, RefinementOutcome]:
     payload = require_object(value, "result")
-    if payload.get("contract_version") != RESULT_CONTRACT:
-        raise ValueError(f"contract_version must be {RESULT_CONTRACT!r}")
+    contract_version = payload.get("contract_version")
+    if contract_version not in {RESULT_CONTRACT, LEGACY_RESULT_CONTRACT}:
+        raise ValueError(
+            "contract_version must be "
+            f"{RESULT_CONTRACT!r} or {LEGACY_RESULT_CONTRACT!r}"
+        )
     case_id = require_string(payload.get("case_id"), "case_id")
     track_id = require_string(payload.get("track_id"), "track_id")
     diagnostics = require_object(payload.get("diagnostics", {}), "diagnostics")
@@ -101,8 +118,29 @@ def outcome_from_dict(value: object) -> tuple[str, RefinementOutcome]:
                         require_object(row, "frame_pose").get("pose"),
                         "frame_pose.pose",
                     ),
+                    role=RefinedFrameRole(
+                        require_object(row, "frame_pose").get("role", "geometry")
+                    ),
                 )
                 for row in frame_rows
+            ),
+            diagnostics=diagnostics,
+        )
+    elif status == "partial_success":
+        if contract_version == LEGACY_RESULT_CONTRACT:
+            raise ValueError("partial_success requires the v2 result contract")
+        frame_rows = require_list(payload.get("frame_poses"), "frame_poses")
+        unsupported_rows = require_list(
+            payload.get("unsupported_frames"), "unsupported_frames"
+        )
+        outcome = PartialRefinementSuccess(
+            track_id=track_id,
+            canonical_size_lwh=require_float_tuple(
+                payload.get("canonical_size_lwh"), 3, "canonical_size_lwh"
+            ),
+            frame_poses=tuple(_refined_frame_pose_from_dict(row) for row in frame_rows),
+            unsupported_frames=tuple(
+                _unsupported_frame_from_dict(row) for row in unsupported_rows
             ),
             diagnostics=diagnostics,
         )
@@ -114,8 +152,30 @@ def outcome_from_dict(value: object) -> tuple[str, RefinementOutcome]:
             diagnostics=diagnostics,
         )
     else:
-        raise ValueError("status must be 'success' or 'insufficient_evidence'")
+        raise ValueError(
+            "status must be 'success', 'partial_success', or 'insufficient_evidence'"
+        )
     return case_id, outcome
+
+
+def _refined_frame_pose_from_dict(value: object) -> RefinedFramePose:
+    row = require_object(value, "frame_pose")
+    return RefinedFramePose(
+        frame_id=require_string(row.get("frame_id"), "frame_pose.frame_id"),
+        pose=pose_from_dict(row.get("pose"), "frame_pose.pose"),
+        role=RefinedFrameRole(row.get("role", "geometry")),
+    )
+
+
+def _unsupported_frame_from_dict(value: object) -> UnsupportedFrame:
+    row = require_object(value, "unsupported_frame")
+    reasons = require_list(row.get("reasons"), "unsupported_frame.reasons")
+    return UnsupportedFrame(
+        frame_id=require_string(row.get("frame_id"), "unsupported_frame.frame_id"),
+        reasons=tuple(
+            require_string(item, "unsupported_frame.reason") for item in reasons
+        ),
+    )
 
 
 def write_outcome(path: str | Path, case_id: str, outcome: RefinementOutcome) -> None:
