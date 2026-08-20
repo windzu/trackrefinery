@@ -3,7 +3,8 @@
 TrackRefinery is an independent, open-source library for single-instance,
 multi-frame 3D object refinement. Given scene point clouds, one already
 associated detection track, and exact frame poses, it estimates one canonical
-instance size and a refined object pose for every input observation.
+instance size and authoritative refined object poses for the supported input
+observations.
 
 ## Product boundary
 
@@ -16,6 +17,10 @@ instance size and a refined object pose for every input observation.
   region inside the library. The caller does not own a crop-margin policy.
 - Use one canonical size per rigid instance and refine per-frame poses against
   that geometry.
+- Prefer a deterministic observable core over weak whole-track coverage.
+  Every input frame must be explicitly classified as authoritative geometry,
+  authoritative pose-only, or unsupported; never present an inherited coarse
+  pose as refined.
 - When evidence cannot support the required accuracy, return an explicit
   insufficient-evidence outcome instead of presenting copied or guessed boxes
   as a successful refinement. Release policy belongs to the caller.

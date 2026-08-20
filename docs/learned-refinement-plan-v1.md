@@ -5,6 +5,8 @@ learned backend is release-qualified
 
 > This direct trajectory box-regression direction was superseded by the
 > [object-centric foundation exploration](object-centric-foundation-exploration-v1.md).
+> That exploration is now deferred behind the deterministic observable-core
+> MVP.
 > In particular, production detector tracks are no longer the primary training
 > distribution, and `delta_log_lwh` is retained only as a negative-control
 > baseline. Do not implement the milestones in this document as the current
@@ -13,7 +15,7 @@ learned backend is release-qualified
 ## Decision
 
 TrackRefinery's next production research direction is a learned,
-trajectory-level refiner. It keeps the existing public contract:
+trajectory-level refiner. Its historical proposal assumed:
 
 ```text
 full per-frame clouds + one associated coarse track + exact frame poses

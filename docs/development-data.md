@@ -209,10 +209,13 @@ and all evaluated frame poses are corrected together. The reviewer also marks:
 
 Gold targets are versioned and never passed to the refiner.
 
-## Learned-backend corpus
+## Future learned-backend corpus
 
-The current learned research direction is documented in the
+The deferred coverage-expansion direction is documented in the
 [object-centric foundation plan](object-centric-foundation-exploration-v1.md).
+The current MVP uses the deterministic
+[observable-core plan](observable-core-refinement-v1.md) and does not require a
+training corpus.
 Its training loader is separate from `InferenceDataset`: training may open
 explicitly paired examples and labels, while production inference retains no
 target API or target-path convention.

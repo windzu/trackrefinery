@@ -1,17 +1,19 @@
 # Evaluation and Review Design
 
-Status: framework, legacy V1 previews, V2 component/frame-role plus anchored
-alignment previews, controlled Stage 3 recovery, and experimental Stage 4
-canonical-size diagnostics implemented; reviewed-target calibration and
-fixed-size per-frame pose diagnostics remain
+Status: framework, explicit partial-frame authority, legacy V1 previews, V2
+component/frame-role plus anchored alignment previews, controlled Stage 3
+recovery, and experimental Stage 4 canonical-size diagnostics implemented;
+observable-core reviewed-target calibration and fixed-size pose diagnostics
+remain
 
 ## What “good” means
 
-A product result is good only when a reviewer accepts the complete instance
-track without moving, rotating, resizing, or otherwise editing any released
-box. If one released frame requires one geometry edit, the track is
-`needs_edit`. Improvement in average IoU or entry into a numeric tolerance is
-not sufficient.
+A product result is good only when a reviewer accepts every authoritative box
+without moving, rotating, resizing, or otherwise editing it. A full success
+covers the complete track. A partial success may omit unsupported frames, but
+it may not copy their coarse boxes into the authoritative result. If one
+released frame requires one geometry edit, the result is `needs_edit`.
+Improvement in average IoU or entry into a numeric tolerance is not sufficient.
 
 Canonical-size, pose, and IoU tolerances remain mandatory development
 diagnostics and may be conservative prerequisites for candidate release. They
@@ -22,7 +24,7 @@ Evaluation compares the same frozen input track before and after refinement:
 ```text
 coarse detector/track boxes (baseline)
     versus
-TrackRefinery canonical size + refined poses
+TrackRefinery canonical size + authoritative refined poses
     versus
 physically separate reviewed gold target
 ```
@@ -42,6 +44,10 @@ Per-frame pose:
 - yaw circular error and full rotation geodesic error where relevant;
 - BEV IoU and 3D IoU;
 - median, P95, and worst evaluated-frame error per track.
+
+For a partial success, baseline and refined pose metrics use exactly the same
+authoritative frame IDs. Reports separately list input, authoritative, and
+unsupported frame counts and IDs. Size remains an instance-level metric.
 
 Evidence/robustness diagnostics:
 
@@ -78,18 +84,19 @@ Report:
 - strict numeric track pass rate;
 - human `accept_as_is` rate for released, judgeable tracks;
 - count of improved, unchanged, and regressed tracks;
-- success precision among tracks for which the backend returned success;
+- success precision among full and partial successes;
+- full-success, partial-success, authoritative-frame, and whole-track coverage;
 - insufficient-evidence rate;
 - catastrophic-success count, where a reported success violates a hard limit;
 - results stratified by class, distance, motion, point count, and visibility.
 
-The primary product metric is strict successful-track precision. Coverage is
-secondary: returning insufficient evidence is preferable to returning geometry
-that a reviewer must correct.
+The primary product metric is strict authoritative-result precision. Coverage
+is secondary: returning a partial result or insufficient evidence is preferable
+to returning geometry that a reviewer must correct.
 
-## Learned-backend promotion order
+## Future learned-backend promotion order
 
-The current learned exploration sequence is specified in the
+The deferred coverage-expansion sequence is specified in the
 [object-centric foundation plan](object-centric-foundation-exploration-v1.md).
 It adds no alternative definition of quality: this document's reviewed-gold
 diagnostics and literal human `accept_as_is` outcome remain authoritative.
@@ -228,7 +235,9 @@ indices and frame-index colors, transformed only by the input-track poses or
 the algorithm poses. Fixed top and side A/B figures use shared axes. This is
 the primary visual test for whether registration reduces rather than increases
 smearing; comparisons across different instances or sampling budgets are not
-valid evidence of improvement.
+valid evidence of improvement. For `partial_success`, both aggregates contain
+only authoritative frames. Unsupported frames remain in the timeline with
+their reason codes and coarse input, but never enter the refined aggregate.
 
 A fixed aggregate alone is insufficient: pose errors can cancel or smear in
 aggregation and hide which frame is wrong. The web viewer therefore provides:

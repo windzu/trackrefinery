@@ -7,8 +7,10 @@ import numpy as np
 
 from trackrefinery import (
     JointCuboidRefiner,
+    PartialRefinementSuccess,
     RefinedFramePose,
     RefinementSuccess,
+    UnsupportedFrame,
     write_geometric_trace,
     write_outcome,
 )
@@ -85,6 +87,46 @@ def test_review_bundle_contains_reproducible_and_interactive_views(
     assert (bundle / "thumbnails" / "alignment_comparison_top.png").is_file()
     assert (bundle / "thumbnails" / "alignment_comparison_side.png").is_file()
     assert (bundle / "thumbnails" / "gold_aggregate_top.png").is_file()
+
+
+def test_partial_review_aggregates_only_authoritative_frames(tmp_path: Path) -> None:
+    generated = generate_dataset(tmp_path / "synthetic")
+    case = InferenceDataset.open(generated.inference_root).load_case("static_complete")
+    target = TargetDataset.open(generated.target_root).load_target(case.case_id)
+    authoritative = target.frame_poses[1:-1]
+    unsupported = (target.frame_poses[0], target.frame_poses[-1])
+    outcome = PartialRefinementSuccess(
+        track_id=target.track_id,
+        canonical_size_lwh=target.canonical_size_lwh,
+        frame_poses=tuple(
+            RefinedFramePose(item.frame_id, item.pose) for item in authoritative
+        ),
+        unsupported_frames=tuple(
+            UnsupportedFrame(item.frame_id, ("sparse_track_tail",))
+            for item in unsupported
+        ),
+    )
+
+    bundle = build_review_bundle(
+        case,
+        outcome,
+        tmp_path / "partial-review",
+        target=target,
+        max_points_per_frame=200,
+    )
+
+    manifest = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
+    assert manifest["authoritative_frame_ids"] == [
+        item.frame_id for item in authoritative
+    ]
+    assert manifest["unsupported_frame_count"] == 2
+    html = (bundle / "preview.html").read_text(encoding="utf-8")
+    assert "Frame authority" in html
+    assert "unsupported · sparse_track_tail" in html
+    with np.load(bundle / "aggregate.npz", allow_pickle=False) as archive:
+        assert set(archive["frame_ids"][archive["frame_index"]]) == {
+            item.frame_id for item in authoritative
+        }
 
 
 def test_review_bundle_renders_algorithm_evidence_trace(tmp_path: Path) -> None:

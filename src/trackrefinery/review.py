@@ -16,6 +16,7 @@ from numpy.typing import NDArray
 
 from trackrefinery.contracts import (
     Box3D,
+    PartialRefinementSuccess,
     Pose3D,
     RefinementCase,
     RefinementOutcome,
@@ -89,6 +90,7 @@ REVIEW_MODES = frozenset(
     }
 )
 REVIEW_DETAIL_LEVELS = frozenset({"catalog", "full"})
+REFINEMENT_SUCCESS_TYPES = (RefinementSuccess, PartialRefinementSuccess)
 
 REVIEW_MODE_PRESENTATION = {
     "algorithm_candidate": {
@@ -210,7 +212,17 @@ def build_review_bundle(
     observations = {item.frame_id: item for item in case.track.observations}
     refined_poses = (
         {item.frame_id: item.pose for item in outcome.frame_poses}
-        if isinstance(outcome, RefinementSuccess)
+        if isinstance(outcome, REFINEMENT_SUCCESS_TYPES)
+        else {}
+    )
+    refined_roles = (
+        {item.frame_id: item.role.value for item in outcome.frame_poses}
+        if isinstance(outcome, REFINEMENT_SUCCESS_TYPES)
+        else {}
+    )
+    unsupported_reasons = (
+        {item.frame_id: item.reasons for item in outcome.unsupported_frames}
+        if isinstance(outcome, PartialRefinementSuccess)
         else {}
     )
     target_poses = (
@@ -241,7 +253,7 @@ def build_review_bundle(
                 outcome.canonical_size_lwh,
                 refined_poses[frame.frame_id].orientation_xyzw,
             )
-            if isinstance(outcome, RefinementSuccess)
+            if frame.frame_id in refined_poses
             else None
         )
         gold_box = (
@@ -318,28 +330,35 @@ def build_review_bundle(
             )
         )
         local = inverse_transform_points(points, alignment_pose).astype(np.float32)
-        aggregate_groups.append(local)
-        if input_track_aggregate_groups is not None:
-            input_track_aggregate_groups.append(
-                inverse_transform_points(points, coarse_box.pose).astype(np.float32)
-            )
-        frame_indices.append(np.full(len(local), frame_index, dtype=np.int16))
-        if gold_box is not None:
-            gold_local = inverse_transform_points(points, gold_box.pose).astype(
-                np.float32
-            )
-            gold_aggregate_groups.append(gold_local)
-            gold_frame_indices.append(
-                np.full(len(gold_local), frame_index, dtype=np.int16)
-            )
-        if point_states is not None:
-            evidence_states.append(point_states)
+        include_in_result_aggregate = (
+            not isinstance(outcome, PartialRefinementSuccess)
+            or frame.frame_id in refined_poses
+        )
+        if include_in_result_aggregate:
+            aggregate_groups.append(local)
+            if input_track_aggregate_groups is not None:
+                input_track_aggregate_groups.append(
+                    inverse_transform_points(points, coarse_box.pose).astype(np.float32)
+                )
+            frame_indices.append(np.full(len(local), frame_index, dtype=np.int16))
+            if gold_box is not None:
+                gold_local = inverse_transform_points(points, gold_box.pose).astype(
+                    np.float32
+                )
+                gold_aggregate_groups.append(gold_local)
+                gold_frame_indices.append(
+                    np.full(len(gold_local), frame_index, dtype=np.int16)
+                )
+            if point_states is not None:
+                evidence_states.append(point_states)
         preview_frames.append(
             {
                 "frame_id": frame.frame_id,
                 "points_xyz": points,
                 "coarse_box": coarse_box,
                 "refined_box": refined_box,
+                "refinement_role": refined_roles.get(frame.frame_id),
+                "unsupported_reasons": unsupported_reasons.get(frame.frame_id),
                 "registration_box": registration_box,
                 "cuboid_candidate_box": cuboid_candidate_box,
                 "gold_box": gold_box,
@@ -360,7 +379,7 @@ def build_review_bundle(
     )
     aggregate_frame_index = np.concatenate(frame_indices)
     has_input_track_comparison = input_track_aggregate is not None and (
-        isinstance(outcome, RefinementSuccess)
+        isinstance(outcome, REFINEMENT_SUCCESS_TYPES)
         or any(
             isinstance(item["registration_box"], Box3D)
             or isinstance(item["cuboid_candidate_box"], Box3D)
@@ -442,6 +461,13 @@ def build_review_bundle(
         "review_mode": review_mode,
         "detail_level": detail_level,
         "frame_ids": [frame.frame_id for frame in case.frames],
+        "authoritative_frame_ids": list(refined_poses),
+        "unsupported_frames": [
+            {"frame_id": frame_id, "reasons": list(reasons)}
+            for frame_id, reasons in unsupported_reasons.items()
+        ],
+        "authoritative_frame_count": len(refined_poses),
+        "unsupported_frame_count": len(unsupported_reasons),
         "crop_scale": crop_scale,
         "max_points_per_frame": max_points_per_frame,
         "has_gold_target": target is not None,
@@ -965,8 +991,12 @@ def _clip_instance_card(instance: object) -> str:
         )
     elif mode == "algorithm_candidate":
         release_label = (
-            "CANDIDATE · SUCCESS"
-            if status == "success"
+            (
+                "CANDIDATE · PARTIAL AUTHORITY"
+                if status == "partial_success"
+                else "CANDIDATE · SUCCESS"
+            )
+            if status in {"success", "partial_success"}
             else f"NOT RELEASED · {status.replace('_', ' ').upper()}"
         )
         mode_label = str(presentation["description"])
@@ -1422,7 +1452,7 @@ def _review_display_geometry(
     outcome: RefinementOutcome,
     cuboid_fit: CuboidFitTrace | None,
 ) -> tuple[tuple[float, float, float], str, str]:
-    if isinstance(outcome, RefinementSuccess):
+    if isinstance(outcome, REFINEMENT_SUCCESS_TYPES):
         return outcome.canonical_size_lwh, "result", "#00c853"
     if (
         cuboid_fit is not None
@@ -1521,7 +1551,7 @@ def _write_alignment_comparison_thumbnails(
     algorithm_size, algorithm_label, algorithm_color = _review_display_geometry(
         preview_frames, outcome, cuboid_fit
     )
-    if isinstance(outcome, RefinementSuccess):
+    if isinstance(outcome, REFINEMENT_SUCCESS_TYPES):
         algorithm_title = "AFTER · refined result alignment"
     elif cuboid_fit is not None and cuboid_fit.status == "candidate":
         algorithm_title = "AFTER · cuboid candidate alignment"
@@ -1672,7 +1702,7 @@ def _write_thumbnails(
         )
         size = (
             outcome.canonical_size_lwh
-            if isinstance(outcome, RefinementSuccess)
+            if isinstance(outcome, REFINEMENT_SUCCESS_TYPES)
             else (
                 cuboid_fit.canonical_size_lwh
                 if cuboid_fit is not None
@@ -1690,7 +1720,7 @@ def _write_thumbnails(
                 )
             )
         )
-        if isinstance(outcome, RefinementSuccess):
+        if isinstance(outcome, REFINEMENT_SUCCESS_TYPES):
             result_label = "result"
             result_color = "#00c853"
         elif cuboid_fit is not None and cuboid_fit.status == "candidate":
@@ -2032,7 +2062,7 @@ def _write_html(
         )
     result_size = (
         outcome.canonical_size_lwh
-        if isinstance(outcome, RefinementSuccess)
+        if isinstance(outcome, REFINEMENT_SUCCESS_TYPES)
         else (
             trace.cuboid_fit.canonical_size_lwh
             if trace is not None
@@ -2047,7 +2077,7 @@ def _write_html(
             )
         )
     )
-    if isinstance(outcome, RefinementSuccess):
+    if isinstance(outcome, REFINEMENT_SUCCESS_TYPES):
         result_label = "result size"
         result_color = "#00c853"
     elif (
@@ -2317,7 +2347,30 @@ def _write_html(
         if evidence_figure is not None
         else ""
     )
-    frame_html = pio.to_html(frame_figure, include_plotlyjs=False, full_html=False)
+    authority_rows = []
+    for item in preview_frames:
+        role = item["refinement_role"]
+        reasons = item["unsupported_reasons"]
+        if isinstance(role, str):
+            disposition = f"authoritative · {role}"
+        elif isinstance(reasons, tuple):
+            disposition = "unsupported · " + ", ".join(reasons)
+        else:
+            disposition = "no authoritative refinement"
+        authority_rows.append(
+            "<tr><td>"
+            + html_module.escape(str(item["frame_id"]))
+            + "</td><td>"
+            + html_module.escape(disposition)
+            + "</td></tr>"
+        )
+    frame_html = (
+        "<h2>Frame authority</h2><table><thead><tr><th>Frame</th>"
+        "<th>TrackRefinery disposition</th></tr></thead><tbody>"
+        + "".join(authority_rows)
+        + "</tbody></table>"
+        + pio.to_html(frame_figure, include_plotlyjs=False, full_html=False)
+    )
     metrics_json = (
         json.dumps(evaluation.to_dict(), indent=2, sort_keys=True)
         if evaluation is not None

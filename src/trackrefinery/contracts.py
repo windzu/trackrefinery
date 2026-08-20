@@ -272,13 +272,37 @@ class RefinementCase:
             raise ValueError("frames must exactly match track observations in order")
 
 
+class RefinedFrameRole(str, Enum):
+    """How an authoritative frame contributed to a refinement result."""
+
+    GEOMETRY = "geometry"
+    POSE_ONLY = "pose_only"
+
+
 @dataclass(frozen=True, slots=True)
 class RefinedFramePose:
     frame_id: str
     pose: Pose3D
+    role: RefinedFrameRole = RefinedFrameRole.GEOMETRY
 
     def __post_init__(self) -> None:
         _nonempty(self.frame_id, "frame_id")
+        object.__setattr__(self, "role", RefinedFrameRole(self.role))
+
+
+@dataclass(frozen=True, slots=True)
+class UnsupportedFrame:
+    """An input frame for which TrackRefinery claims no refined pose."""
+
+    frame_id: str
+    reasons: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _nonempty(self.frame_id, "frame_id")
+        if not self.reasons or any(
+            not isinstance(reason, str) or not reason.strip() for reason in self.reasons
+        ):
+            raise ValueError("unsupported frame requires non-empty reasons")
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,6 +337,45 @@ class RefinementSuccess:
 
 
 @dataclass(frozen=True, slots=True)
+class PartialRefinementSuccess:
+    """A canonical result with authority over only a supported frame subset."""
+
+    track_id: str
+    canonical_size_lwh: tuple[float, float, float]
+    frame_poses: tuple[RefinedFramePose, ...]
+    unsupported_frames: tuple[UnsupportedFrame, ...]
+    diagnostics: Mapping[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _nonempty(self.track_id, "track_id")
+        size = _finite_tuple(
+            self.canonical_size_lwh,
+            length=3,
+            name="canonical_size_lwh",
+        )
+        if any(component <= 0 for component in size):
+            raise ValueError("canonical_size_lwh components must be positive")
+        frame_ids = [item.frame_id for item in self.frame_poses]
+        unsupported_ids = [item.frame_id for item in self.unsupported_frames]
+        if not frame_ids or len(frame_ids) != len(set(frame_ids)):
+            raise ValueError("frame_poses must contain unique frames")
+        if not unsupported_ids or len(unsupported_ids) != len(set(unsupported_ids)):
+            raise ValueError("unsupported_frames must contain unique frames")
+        if set(frame_ids) & set(unsupported_ids):
+            raise ValueError("refined and unsupported frames must be disjoint")
+        object.__setattr__(self, "canonical_size_lwh", size)
+        object.__setattr__(
+            self,
+            "diagnostics",
+            _freeze_json(self.diagnostics, "diagnostics"),
+        )
+
+    @property
+    def status(self) -> str:
+        return "partial_success"
+
+
+@dataclass(frozen=True, slots=True)
 class InsufficientEvidence:
     track_id: str
     reasons: tuple[str, ...]
@@ -333,4 +396,4 @@ class InsufficientEvidence:
         return "insufficient_evidence"
 
 
-RefinementOutcome = RefinementSuccess | InsufficientEvidence
+RefinementOutcome = RefinementSuccess | PartialRefinementSuccess | InsufficientEvidence

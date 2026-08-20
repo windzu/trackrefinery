@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 from trackrefinery.contracts import (
     Box3D,
     InsufficientEvidence,
+    PartialRefinementSuccess,
     RefinementCase,
     RefinementOutcome,
 )
@@ -95,6 +96,11 @@ class EvaluationReport:
     category: str | None
     expected_refinable: bool
     outcome_status: str
+    input_frame_count: int
+    authoritative_frame_count: int
+    unsupported_frame_count: int
+    authoritative_frame_ids: tuple[str, ...]
+    unsupported_frame_ids: tuple[str, ...]
     baseline: MetricSummary
     refined: MetricSummary | None
     strict_pass: bool | None
@@ -122,9 +128,35 @@ def evaluate_case(
 
     validate_outcome(case, outcome)
     _validate_target(case, target)
-    target_poses = {
+    all_target_poses = {
         item.frame_id: item.pose for item in target.frame_poses if item.evaluable
     }
+    authoritative_ids = (
+        tuple(item.frame_id for item in outcome.frame_poses)
+        if not isinstance(outcome, InsufficientEvidence)
+        else ()
+    )
+    unsupported_ids = (
+        tuple(item.frame_id for item in outcome.unsupported_frames)
+        if isinstance(outcome, PartialRefinementSuccess)
+        else (
+            tuple(item.frame_id for item in case.track.observations)
+            if isinstance(outcome, InsufficientEvidence)
+            else ()
+        )
+    )
+    target_poses = (
+        {
+            frame_id: pose
+            for frame_id, pose in all_target_poses.items()
+            if frame_id in set(authoritative_ids)
+        }
+        if authoritative_ids
+        else all_target_poses
+    )
+    has_authoritative_evaluable_frames = bool(target_poses)
+    if not target_poses:
+        target_poses = all_target_poses
     observations = {
         item.frame_id: item
         for item in case.track.observations
@@ -150,6 +182,23 @@ def evaluate_case(
         strict_pass = not target.expected_refinable
         reasons = outcome.reasons
     else:
+        if not has_authoritative_evaluable_frames:
+            return EvaluationReport(
+                case_id=case.case_id,
+                track_id=case.track.track_id,
+                category=case.track.category,
+                expected_refinable=target.expected_refinable,
+                outcome_status=outcome.status,
+                input_frame_count=len(case.frames),
+                authoritative_frame_count=len(authoritative_ids),
+                unsupported_frame_count=len(unsupported_ids),
+                authoritative_frame_ids=authoritative_ids,
+                unsupported_frame_ids=unsupported_ids,
+                baseline=baseline,
+                refined=None,
+                strict_pass=False,
+                reasons=("no_authoritative_evaluable_frames",),
+            )
         poses = {item.frame_id: item.pose for item in outcome.frame_poses}
         refined_boxes = {
             frame_id: Box3D(
@@ -184,6 +233,11 @@ def evaluate_case(
         category=case.track.category,
         expected_refinable=target.expected_refinable,
         outcome_status=outcome.status,
+        input_frame_count=len(case.frames),
+        authoritative_frame_count=len(authoritative_ids),
+        unsupported_frame_count=len(unsupported_ids),
+        authoritative_frame_ids=authoritative_ids,
+        unsupported_frame_ids=unsupported_ids,
         baseline=baseline,
         refined=refined,
         strict_pass=strict_pass,
@@ -195,6 +249,8 @@ def evaluate_case(
 class BenchmarkCounts:
     total_cases: int
     successes: int
+    full_successes: int
+    partial_successes: int
     insufficient_evidence: int
     expected_refinable: int
     strict_pass: int
@@ -264,9 +320,14 @@ def evaluate_suite(
 
 
 def _benchmark_counts(reports: list[EvaluationReport]) -> BenchmarkCounts:
+    success_statuses = {"success", "partial_success"}
     return BenchmarkCounts(
         total_cases=len(reports),
-        successes=sum(report.outcome_status == "success" for report in reports),
+        successes=sum(report.outcome_status in success_statuses for report in reports),
+        full_successes=sum(report.outcome_status == "success" for report in reports),
+        partial_successes=sum(
+            report.outcome_status == "partial_success" for report in reports
+        ),
         insufficient_evidence=sum(
             report.outcome_status == "insufficient_evidence" for report in reports
         ),
@@ -275,7 +336,7 @@ def _benchmark_counts(reports: list[EvaluationReport]) -> BenchmarkCounts:
         strict_fail=sum(report.strict_pass is False for report in reports),
         strict_unset=sum(report.strict_pass is None for report in reports),
         unexpected_success=sum(
-            report.outcome_status == "success" and not report.expected_refinable
+            report.outcome_status in success_statuses and not report.expected_refinable
             for report in reports
         ),
         missed_refinable=sum(
@@ -284,7 +345,7 @@ def _benchmark_counts(reports: list[EvaluationReport]) -> BenchmarkCounts:
             for report in reports
         ),
         catastrophic_success=sum(
-            report.outcome_status == "success" and report.strict_pass is False
+            report.outcome_status in success_statuses and report.strict_pass is False
             for report in reports
         ),
     )
